@@ -1,0 +1,11 @@
+enclave {
+    trusted {
+        public void RecursiveShuffle_M1([user_check] unsigned char *buf, uint64_t N, size_t block_size);
+        public void RecursiveShuffle_M2([user_check] unsigned char *buf, uint64_t N, size_t block_size);
+        public double RecursiveShuffle_M2_opt([user_check] unsigned char *buf, uint64_t N, size_t block_size);
+  
+        public double DecryptAndShuffleM1([user_check] unsigned char *encrypted_buffer, size_t N, size_t encrypted_block_size, [user_check] unsigned char* result_buffer, [user_check] enc_ret *ret);
+        public double DecryptAndShuffleM2([user_check] unsigned char *encrypted_buffer, size_t N, size_t encrypted_block_size, size_t nthreads, [user_check] unsigned char* result_buffer, [user_check] enc_ret *ret);
+
+    };
+};

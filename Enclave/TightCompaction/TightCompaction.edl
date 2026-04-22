@@ -1,0 +1,8 @@
+
+enclave {
+    trusted {
+        public double testTightCompaction([user_check] unsigned char *buffer, size_t N, size_t block_size, size_t nthreads, [user_check] bool *selected_list, [user_check] enc_ret *ret);
+        public double testOPTightCompaction([user_check] unsigned char *buffer, size_t N, size_t block_size, [user_check] bool *selected_list, [user_check] enc_ret *ret);
+
+    };
+};

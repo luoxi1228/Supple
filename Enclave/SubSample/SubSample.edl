@@ -1,0 +1,8 @@
+enclave {
+    trusted {
+        public void decryptAndSubSample([user_check] unsigned char *encrypted_buffer, size_t N, size_t M, size_t encrypted_block_size, [user_check] unsigned char *encryt_result_buffer, [user_check] enc_ret *ret);
+        public void decryptAndSubSampleMulti([user_check] unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size, [user_check] unsigned char *encryt_result_buffer, [user_check] enc_ret *ret);
+        public void decryptAndSubSampleMulti_opt([user_check] unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size, [user_check] unsigned char *encryt_result_buffer, [user_check] enc_ret *ret);
+
+    };
+};

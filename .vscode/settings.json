@@ -1,0 +1,5 @@
+{
+    "C_Cpp.errorSquiggles": "disabled",
+    "http.proxy": "http://127.0.0.1:17890",
+    "http.proxyStrictSSL": true
+}
