@@ -44,7 +44,7 @@ void subSample(unsigned char *buffer,
   markGen(N, M, mark_list);
 
   ocall_clock(&t0);
-  OP_TightCompact_v2(buffer, N, block_size, mark_list);
+  TightCompact_v2(buffer, N, block_size, mark_list);
   RecursiveShuffle_M2(buffer, M, block_size); 
   ocall_clock(&t1);
 
@@ -190,13 +190,10 @@ void subSampleMulti_opt(unsigned char *buffer, size_t N, size_t M, size_t K,
     }
 
     size_t bit_offset = 0;
-    MarkWorkspace_opt left_mws, right_mws;
-    RecPrecompute_opt(mark_list.data(), N, mark_words, K, M, B, bit_offset, &left_mws, &right_mws);
+    RecPrecompute_opt(mark_list.data(), N, mark_words, K, M, B, bit_offset);
     
     // SGX 内存解压：立刻释放庞大的 Mark 表及其临时工作区
     std::vector<size_t>().swap(mark_list); 
-    std::vector<size_t>().swap(left_mws.mark_buf);
-    std::vector<size_t>().swap(right_mws.mark_buf);
 
     ocall_clock(&t1);
     ret->gen_perm_time = ((double)(t1 - t0)) / 1000.0;
@@ -205,7 +202,6 @@ void subSampleMulti_opt(unsigned char *buffer, size_t N, size_t M, size_t K,
     std::vector<unsigned char> plain_result(total_blocks * block_size, 0);
 
     bit_offset = 0; // 重置游标，准备精确复播
-    DataWorkspace_opt left_dws, right_dws;
     
 #ifdef COUNT_OSWAPS
     // 记录在线阶段开始前的 OSwap 数量基准值
@@ -216,7 +212,7 @@ void subSampleMulti_opt(unsigned char *buffer, size_t N, size_t M, size_t K,
     ocall_clock(&t0);
 
     RecSampling_opt(buffer, N, K, M, block_size, plain_result.data(), total_blocks,
-                    B, bit_offset, &left_dws, &right_dws);
+                    B, bit_offset);
 
     ocall_clock(&t1);
     ret->apply_perm_time = ((double)(t1 - t0)) / 1000.0;
@@ -523,17 +519,17 @@ void ORCompactPair(const unsigned char *data,
   }
 
   // 3) 固定长度 compact
-  OP_TightCompact_v2(ws.data_ptr(),
-                     usable_len,
-                     block_size,
-                     const_cast<bool *>(selected));
+  TightCompact_v2(ws.data_ptr(),
+                  usable_len,
+                  block_size,
+                  const_cast<bool *>(selected));
 
   if (dst_mark_words > 0)
   {
-    OP_TightCompact_v2(reinterpret_cast<unsigned char *>(ws.mark_ptr()),
-                       usable_len,
-                       sizeof(size_t) * dst_mark_words,
-                       const_cast<bool *>(selected));
+    TightCompact_v2(reinterpret_cast<unsigned char *>(ws.mark_ptr()),
+                    usable_len,
+                    sizeof(size_t) * dst_mark_words,
+                    const_cast<bool *>(selected));
   }
 
   // 4) 逻辑上只保留 target_size
@@ -682,6 +678,37 @@ size_t RecSampling(const unsigned char *data,
 }
 
 
+struct MarkWorkspacePair_opt {
+    MarkWorkspace_opt left;
+    MarkWorkspace_opt right;
+};
+
+struct DataWorkspacePair_opt {
+    DataWorkspace_opt left;
+    DataWorkspace_opt right;
+};
+
+static size_t OptWorkspaceDepth(size_t k) {
+    size_t depth = 0;
+    while (k > 1) {
+        depth++;
+        k = (k + 1) / 2;
+    }
+    return depth + 1;
+}
+
+static void RecPrecompute_opt_impl(const size_t *mark, size_t len_items, size_t mark_words,
+                                   size_t k, size_t M, uint8_t *B, size_t &bit_offset,
+                                   std::vector<MarkWorkspacePair_opt> &workspaces,
+                                   size_t depth);
+
+static size_t RecSampling_opt_impl(const unsigned char *data, size_t len_items,
+                                   size_t k, size_t M, size_t block_size,
+                                   unsigned char *out, size_t out_capacity,
+                                   const uint8_t *B, size_t &bit_offset,
+                                   std::vector<DataWorkspacePair_opt> &workspaces,
+                                   size_t depth);
+
 void CompactMark_opt(const size_t *mark, size_t len_items, size_t src_mark_words,
                      const bool *selected, size_t target_size, size_t slice_start,
                      size_t slice_bits, MarkWorkspace_opt &ws) {
@@ -699,16 +726,18 @@ void CompactMark_opt(const size_t *mark, size_t len_items, size_t src_mark_words
                          ws.mark_ptr() + (i * dst_mark_words), dst_mark_words);
     }
     
-    OP_TightCompact_v2(reinterpret_cast<unsigned char *>(ws.mark_ptr()),
-                       len_items, sizeof(size_t) * dst_mark_words, const_cast<bool *>(selected));
+    TightCompact_v2(reinterpret_cast<unsigned char *>(ws.mark_ptr()),
+                    len_items, sizeof(size_t) * dst_mark_words, const_cast<bool *>(selected));
     
     ws.item_count = target_size;
 }
 
-void RecPrecompute_opt(const size_t *mark, size_t len_items, size_t mark_words,
-                       size_t k, size_t M, uint8_t *B, size_t &bit_offset,
-                       MarkWorkspace_opt *left_ws, MarkWorkspace_opt *right_ws ) {
+static void RecPrecompute_opt_impl(const size_t *mark, size_t len_items, size_t mark_words,
+                                   size_t k, size_t M, uint8_t *B, size_t &bit_offset,
+                                   std::vector<MarkWorkspacePair_opt> &workspaces,
+                                   size_t depth) {
     if (k == 1 || len_items == 0 || mark_words == 0) return;
+    if (mark == nullptr || B == nullptr || depth >= workspaces.size()) return;
 
     size_t k_left = k / 2;
     size_t k_right = k - k_left;
@@ -718,6 +747,10 @@ void RecPrecompute_opt(const size_t *mark, size_t len_items, size_t mark_words,
     bool *selected_R = AcquireSelectedScratchB(len_items);
     size_t *mark_rangeL = AcquireMarkScratchA(mark_words);
     size_t *mark_rangeR = AcquireMarkScratchB(mark_words);
+    if (selected_L == nullptr || selected_R == nullptr ||
+        mark_rangeL == nullptr || mark_rangeR == nullptr) {
+        return;
+    }
 
     for (size_t w = 0; w < mark_words; w++) {
         mark_rangeL[w] = MakeRangeMarkWord(0, k_left, w);
@@ -740,7 +773,7 @@ void RecPrecompute_opt(const size_t *mark, size_t len_items, size_t mark_words,
     for (size_t i = 0; i < len_items; i++) {
         if (selected_L[i]) {
             size_t pos = bit_offset + i;
-            B[pos / 8] |= (1 << (pos % 8));
+            B[pos / 8] |= static_cast<uint8_t>(1U << (pos % 8));
         }
     }
     bit_offset += len_items;
@@ -748,7 +781,7 @@ void RecPrecompute_opt(const size_t *mark, size_t len_items, size_t mark_words,
     for (size_t i = 0; i < len_items; i++) {
         if (selected_R[i]) {
             size_t pos = bit_offset + i;
-            B[pos / 8] |= (1 << (pos % 8));
+            B[pos / 8] |= static_cast<uint8_t>(1U << (pos % 8));
         }
     }
     bit_offset += len_items;
@@ -757,9 +790,8 @@ void RecPrecompute_opt(const size_t *mark, size_t len_items, size_t mark_words,
     size_t size_L = std::min(len_items, M * k_left);
     size_t size_R = std::min(len_items, M * k_right);
 
-    MarkWorkspace_opt local_left_ws, local_right_ws;
-    MarkWorkspace_opt *LWS = (left_ws != nullptr) ? left_ws : &local_left_ws;
-    MarkWorkspace_opt *RWS = (right_ws != nullptr) ? right_ws : &local_right_ws;
+    MarkWorkspace_opt *LWS = &workspaces[depth].left;
+    MarkWorkspace_opt *RWS = &workspaces[depth].right;
 
     CompactMark_opt(mark, len_items, mark_words, selected_L, size_L, 0, k_left, *LWS);
     CompactMark_opt(mark, len_items, mark_words, selected_R, size_R, k_left, k_right, *RWS);
@@ -767,8 +799,20 @@ void RecPrecompute_opt(const size_t *mark, size_t len_items, size_t mark_words,
     const size_t left_words = (k_left + wordBits - 1) / wordBits;
     const size_t right_words = (k_right + wordBits - 1) / wordBits;
 
-    RecPrecompute_opt(LWS->mark_ptr(), LWS->item_count, left_words, k_left, M, B, bit_offset, LWS, RWS);
-    RecPrecompute_opt(RWS->mark_ptr(), RWS->item_count, right_words, k_right, M, B, bit_offset, LWS, RWS);
+    RecPrecompute_opt_impl(LWS->mark_ptr(), LWS->item_count, left_words, k_left, M,
+                           B, bit_offset, workspaces, depth + 1);
+    RecPrecompute_opt_impl(RWS->mark_ptr(), RWS->item_count, right_words, k_right, M,
+                           B, bit_offset, workspaces, depth + 1);
+}
+
+void RecPrecompute_opt(const size_t *mark, size_t len_items, size_t mark_words,
+                       size_t k, size_t M, uint8_t *B, size_t &bit_offset,
+                       MarkWorkspace_opt *left_ws, MarkWorkspace_opt *right_ws ) {
+    (void)left_ws;
+    (void)right_ws;
+    std::vector<MarkWorkspacePair_opt> workspaces(OptWorkspaceDepth(k));
+    RecPrecompute_opt_impl(mark, len_items, mark_words, k, M, B, bit_offset,
+                           workspaces, 0);
 }
 
 void CompactData_opt(const unsigned char *data, size_t len_items, const bool *selected,
@@ -782,14 +826,16 @@ void CompactData_opt(const unsigned char *data, size_t len_items, const bool *se
     }
 
     std::memcpy(ws.data_ptr(), data, len_items * block_size);
-    OP_TightCompact_v2(ws.data_ptr(), len_items, block_size, const_cast<bool *>(selected));
+    TightCompact_v2(ws.data_ptr(), len_items, block_size, const_cast<bool *>(selected));
     ws.item_count = target_size;
 }
 
-size_t RecSampling_opt(const unsigned char *data, size_t len_items, size_t k, size_t M,
-                       size_t block_size, unsigned char *out, size_t out_capacity,
-                       const uint8_t *B, size_t &bit_offset,
-                       DataWorkspace_opt *left_ws, DataWorkspace_opt *right_ws) {
+static size_t RecSampling_opt_impl(const unsigned char *data, size_t len_items,
+                                   size_t k, size_t M, size_t block_size,
+                                   unsigned char *out, size_t out_capacity,
+                                   const uint8_t *B, size_t &bit_offset,
+                                   std::vector<DataWorkspacePair_opt> &workspaces,
+                                   size_t depth) {
     if (block_size == 0 || out_capacity == 0) return 0;
 
     if (k == 1 || len_items == 0) {
@@ -802,6 +848,7 @@ size_t RecSampling_opt(const unsigned char *data, size_t len_items, size_t k, si
         }
         return copy_count;
     }
+    if (data == nullptr || out == nullptr || B == nullptr || depth >= workspaces.size()) return 0;
 
     size_t k_left = k / 2;
     size_t k_right = k - k_left;
@@ -809,6 +856,7 @@ size_t RecSampling_opt(const unsigned char *data, size_t len_items, size_t k, si
     // 获取临时解包缓冲区
     bool *selected_L = AcquireSelectedScratchA(len_items);
     bool *selected_R = AcquireSelectedScratchB(len_items);
+    if (selected_L == nullptr || selected_R == nullptr) return 0;
 
     // 1. 流式解包：从压缩位数组 B 还原到 bool 数组
     for (size_t i = 0; i < len_items; i++) {
@@ -827,19 +875,34 @@ size_t RecSampling_opt(const unsigned char *data, size_t len_items, size_t k, si
     size_t size_L = std::min(len_items, k_left * M);
     size_t size_R = std::min(len_items, k_right * M);
 
-    DataWorkspace_opt local_left_ws, local_right_ws;
-    DataWorkspace_opt *LWS = (left_ws != nullptr) ? left_ws : &local_left_ws;
-    DataWorkspace_opt *RWS = (right_ws != nullptr) ? right_ws : &local_right_ws;
+    DataWorkspace_opt *LWS = &workspaces[depth].left;
+    DataWorkspace_opt *RWS = &workspaces[depth].right;
 
     CompactData_opt(data, len_items, selected_L, size_L, block_size, *LWS);
     CompactData_opt(data, len_items, selected_R, size_R, block_size, *RWS);
 
-    size_t written_L = RecSampling_opt(LWS->data_ptr(), LWS->item_count, k_left, M, block_size,
-                                       out, out_capacity, B, bit_offset, LWS, RWS);
+    size_t written_L = RecSampling_opt_impl(LWS->data_ptr(), LWS->item_count,
+                                            k_left, M, block_size,
+                                            out, out_capacity, B, bit_offset,
+                                            workspaces, depth + 1);
                                        
-    size_t written_R = RecSampling_opt(RWS->data_ptr(), RWS->item_count, k_right, M, block_size,
-                                       out + (written_L * block_size), out_capacity - written_L,
-                                       B, bit_offset, LWS, RWS);
+    size_t written_R = RecSampling_opt_impl(RWS->data_ptr(), RWS->item_count,
+                                            k_right, M, block_size,
+                                            out + (written_L * block_size),
+                                            out_capacity - written_L,
+                                            B, bit_offset, workspaces,
+                                            depth + 1);
 
     return written_L + written_R;
+}
+
+size_t RecSampling_opt(const unsigned char *data, size_t len_items, size_t k, size_t M,
+                       size_t block_size, unsigned char *out, size_t out_capacity,
+                       const uint8_t *B, size_t &bit_offset,
+                       DataWorkspace_opt *left_ws, DataWorkspace_opt *right_ws) {
+    (void)left_ws;
+    (void)right_ws;
+    std::vector<DataWorkspacePair_opt> workspaces(OptWorkspaceDepth(k));
+    return RecSampling_opt_impl(data, len_items, k, M, block_size, out,
+                                out_capacity, B, bit_offset, workspaces, 0);
 }

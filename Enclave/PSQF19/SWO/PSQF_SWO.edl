@@ -1,0 +1,7 @@
+enclave {
+    trusted {
+        public void DecPSQF_single([user_check] unsigned char *encrypted_buffer, size_t N, size_t M, size_t encrypted_block_size, [user_check] unsigned char *encryt_result_buffer, [user_check] enc_ret *ret);
+
+        public void DecPSQF_SWO([user_check] unsigned char *encrypted_buffer, size_t N, size_t M, size_t encrypted_block_size, [user_check] unsigned char *encryt_result_buffer, [user_check] enc_ret *ret);
+    };
+};

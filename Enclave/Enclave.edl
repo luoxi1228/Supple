@@ -56,7 +56,8 @@ enclave {
     from "RecursiveShuffle/RecursiveShuffle.edl" import *;
     from "TightCompaction/TightCompaction.edl" import *;
     from "SubSample/SubSample.edl" import *;
-    from "SubSampleShuffle/SubSampleShuffle.edl" import *;
+    from "PSQF19/SWO/PSQF_SWO.edl" import *;
+    from "SubSample_v2/SWO/SuppleSWO.edl" import *;
 
     /*
      * ocall_print_string - invokes OCALL to display string buffer inside the enclave.

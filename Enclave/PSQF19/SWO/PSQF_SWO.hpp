@@ -1,29 +1,29 @@
-#ifndef __SUBSAMPLE_SHUFFLE_HPP__
-#define __SUBSAMPLE_SHUFFLE_HPP__
+#ifndef __PSQF19_SWO_PSQF_SWO_HPP__
+#define __PSQF19_SWO_PSQF_SWO_HPP__
 
 #ifndef BEFTS_MODE
   #include <cstddef>
   #include <cstdint>
   #include <vector>
   #include <cstring>
-  #include "../foav.h"
-  #include "../oasm_lib.h"
-  #include "../ObliviousPrimitives.hpp"
-  #include "../Enclave_globals.h"
-  #include "../utils.hpp"
-  #include "../aes.hpp"
+  #include "../../foav.h"
+  #include "../../oasm_lib.h"
+  #include "../../ObliviousPrimitives.hpp"
+  #include "../../Enclave_globals.h"
+  #include "../../utils.hpp"
+  #include "../../aes.hpp"
 #endif
 
 // shuffle-truncate
-void subSampleShuffle(unsigned char *buffer, size_t N, size_t M, size_t block_size, unsigned char *result_buffer, enc_ret *ret);
+void PSQF_single(unsigned char *buffer, size_t N, size_t M, size_t block_size, unsigned char *result_buffer, enc_ret *ret);
 
 // decrytion-shuffle-truncate-encryption
-void decryptAndSubSampleShuffle(unsigned char *encrypted_buffer, size_t N, size_t M, size_t encrypted_block_size, unsigned char *encryt_result_buffer, enc_ret *ret);
+void DecPSQF_single(unsigned char *encrypted_buffer, size_t N, size_t M, size_t encrypted_block_size, unsigned char *encryt_result_buffer, enc_ret *ret);
 
 // multi-way subsample with oblivious SWO
-void subSampleSWO(unsigned char *buffer, size_t N, size_t M, size_t block_size, unsigned char *result_buffer, enc_ret *ret);
+void PSQF_SWO(unsigned char *buffer, size_t N, size_t M, size_t block_size, unsigned char *result_buffer, enc_ret *ret);
 
-void decryptAndSubSampleSWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t encrypted_block_size, unsigned char *encryt_result_buffer, enc_ret *ret);
+void DecPSQF_SWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t encrypted_block_size, unsigned char *encryt_result_buffer, enc_ret *ret);
 
 // SWO helper: builds k pseudo-random permutations over [0,n-1] using per-sample
 // PRP keys. A key j is in sample i iff rho_i(j) <= m.

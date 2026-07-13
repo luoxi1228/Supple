@@ -7,14 +7,14 @@ from typing import Any, Dict, List
 
 # Base template. Edit these defaults as needed.
 BASE_CONFIG: Dict[str, Any] = {
-    "modes": [31,33,32,34,35],
+    "modes": [1,2,3,4,5,6],
     "p": [0.0078125],
     "n": [1048576],
     "k": [896],
     "k_select": 1,
     "block_sizes": [4, 8, 16, 24, 48, 72, 128, 168, 256, 344, 512, 680, 768, 1032, 1280, 1544, 2048, 2568, 3072, 3592, 3840, 4096],
     "repeat": 1,
-    "results_folder": "../RESULTS",
+    "results_folder": "RESULTS",
     "overwrite": False,
 }
 
@@ -23,47 +23,47 @@ BASE_CONFIG: Dict[str, Any] = {
 EXPERIMENT_GROUPS: List[Dict[str, Any]] = [
     {
         "name": "group_p",
-        "modes": [31,33,32,34,35],
+        "modes": [1,2,3,4,5,6],
         "p": [0.25, 0.0625, 0.015625, 0.00390625, 0.0009765625], # 1/4 to 1/1024
         "n": [1048576],
         "k": [1],
         "k_select": 1,
         "block_sizes": [16],
         "repeat": 2,
-        "results_folder": "../RESULTS",
+        "results_folder": "RESULTS",
         "overwrite": False,
     },{
         "name": "group_k",
-        "modes": [31,33,32,34,35],
+        "modes": [1,2,3,4,5,6],
         "p": [0.015625],
         "n": [1048576],
         "k": [4,16,64,256,1024],   # 4 to 1024
         "k_select": 2,
         "block_sizes": [16],
         "repeat": 2,
-        "results_folder": "../RESULTS",
+        "results_folder": "RESULTS",
         "overwrite": False,
     },{
         "name": "group_b",
-        "modes": [31,33,32,34,35],
+        "modes": [1,2,3,4,5,6],
         "p": [0.015625],
         "n": [1048576],
         "k": [1],
         "k_select": 1,
         "block_sizes": [16,64,256,1024,4096], # 16 to 4096
         "repeat": 2,
-        "results_folder": "../RESULTS",
+        "results_folder": "RESULTS",
         "overwrite": False,
     },{
         "name": "group_n",
-        "modes": [31,33,32,34,35],
+        "modes": [1,2,3,4,5,6],
         "p": [0.015625],
         "n": [1048576, 4194304, 16777216, 67108864, 268435456], # 1M to 256M
         "k": [1],
         "k_select": 1,
         "block_sizes": [16],
         "repeat": 2,
-        "results_folder": "../RESULTS",
+        "results_folder": "RESULTS",
         "overwrite": False,
     },
 
@@ -123,8 +123,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    app_dir = Path(__file__).resolve().parent
-    run_experiments_py = app_dir / "run_experiments.py"
+    project_dir = Path(__file__).resolve().parent
+    run_experiments_py = project_dir / "run_experiments.py"
     if not run_experiments_py.exists():
         print(f"Missing script: {run_experiments_py}")
         return 2
@@ -148,7 +148,7 @@ def main() -> int:
         if args.dry_run:
             continue
 
-        result = subprocess.run(cmd, cwd=str(app_dir))
+        result = subprocess.run(cmd, cwd=str(project_dir))
         if result.returncode != 0:
             print(f"Group '{name}' failed with exit code {result.returncode}")
             if args.stop_on_error:

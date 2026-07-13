@@ -20,7 +20,7 @@ make clean
 make
 ```
 
-Note: `Application/run_experiments.py` also invokes `make -C ../` for each run,
+Note: `run_experiments.py` also invokes `make -C <project-root>` for each run,
 so pre-building is recommended but not strictly required.
 
 ------------------------------------------------------------------------
@@ -29,12 +29,12 @@ so pre-building is recommended but not strictly required.
 
 Current experiment entrypoints are:
 
-- `Application/run_experiments.py`: single config run (CLI configurable)
-- `Application/run.py`: batch runner for multiple experiment groups
+- `run_experiments.py`: single config run (CLI configurable)
+- `run.py`: batch runner for multiple experiment groups
 
 ## 2.1 Quick Start (Batch Mode, Recommended)
 
-From `Application/`:
+From the project root:
 
 ```bash
 ./run.py --overwrite-first
@@ -53,22 +53,22 @@ Default group layout in `run.py`:
 - `group_b`: sweep block size
 - `group_n`: sweep `n`
 
-All groups currently use modes `[31,33,32,34,35]`.
+All groups currently use modes `[1,2,3,4,5,6]`.
 
 ## 2.2 Direct Run (Single Command)
 
-From `Application/`:
+From the project root:
 
 ```bash
 ./run_experiments.py \
-    --modes 31,32,33,34,35 \
+    --modes 1,2,3,4,5,6 \
     --n 1048576 \
     --p 0.015625 \
     --k 4,16,64,256,1024 \
     --k-select 2 \
     --block-sizes 16,64,256,1024,4096 \
     --repeat 2 \
-    --results-folder ../RESULTS \
+    --results-folder RESULTS \
     --overwrite
 ```
 
@@ -86,33 +86,35 @@ From `Application/`:
 
 ### Mode List (Current)
 
-- `31`: S&T
-- `32`: PSQF
-- `33`: OSBSubsample(SingleSubsampling)
-- `34`: RecSubsample(MultiSubsampling)
-- `35`: OMBSubsample(OptMultiSubsampling)
+- `1`: PSQF_single
+- `2`: PSQF_SWO
+- `3`: OSBSubsample(SingleSubsampling)
+- `4`: RecSubsample(MultiSubsampling)
+- `5`: OMBSubsample(OptMultiSubsampling)
+- `6`: SuppleSWO
 
 ### `k` Selection Behavior
 
-- Modes `34` and `35`:
+- Modes `4`, `5`, and `6`:
     - `k-select=1`: use derived `k = max(1, int(1/p))`
     - `k-select=2`: sweep values from `--k`
-- Mode `32`: always uses `k = max(1, int(1/p))`
-- Modes `31` and `33`: fixed `k = 1`
+- Mode `2`: always uses `k = max(1, int(1/p))`
+- Modes `1` and `3`: fixed `k = 1`
 
 ------------------------------------------------------------------------
 
 # 3. Output Files and Log Format
 
-Results are written under `--results-folder` (default `../RESULTS`).
+Results are written under `--results-folder` (default `RESULTS`).
 
 Each mode is appended to one log file:
 
-- `<RESULTS_FOLDER>/31.lg`
-- `<RESULTS_FOLDER>/32.lg`
-- `<RESULTS_FOLDER>/33.lg`
-- `<RESULTS_FOLDER>/34.lg`
-- `<RESULTS_FOLDER>/35.lg`
+- `<RESULTS_FOLDER>/PSQF_single.lg`
+- `<RESULTS_FOLDER>/PSQF_SWO.lg`
+- `<RESULTS_FOLDER>/SubSample.lg`
+- `<RESULTS_FOLDER>/SubSampleMultiSlice.lg`
+- `<RESULTS_FOLDER>/SubSampleMulti_opt.lg`
+- `<RESULTS_FOLDER>/SuppleSWO.lg`
 
 
 ## 3.1 Common Prefix Columns
@@ -121,13 +123,13 @@ All modes start with:
 
 `block_size, p, n, k, ...`
 
-## 3.2 Mode 31/32/33
+## 3.2 Mode 1/2/3
 
 Columns:
 
 `block_size, p, n, k, ecall_time, ptime, oswaps, heap_est_mb`
 
-## 3.3 Mode 34/35
+## 3.3 Mode 4/5/6
 
 Columns:
 
@@ -172,5 +174,3 @@ Note:
     read local `.lg` files in each subfolder (such as `01_S&T.lg` ... `05_OptBatch.lg`).
 
 ------------------------------------------------------------------------
-
-

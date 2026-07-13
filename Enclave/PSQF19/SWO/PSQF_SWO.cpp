@@ -1,10 +1,10 @@
-#include "SubSampleShuffle.hpp"
-#include "../ObliviousPrimitives.hpp"
-#include "../RecursiveShuffle/RecursiveShuffle.hpp"
+#include "PSQF_SWO.hpp"
+#include "../../ObliviousPrimitives.hpp"
+#include "../../RecursiveShuffle/RecursiveShuffle.hpp"
 #include <cstring>
 #include <cstdlib>
 
-void subSampleShuffle(unsigned char *buffer, size_t N, size_t M, size_t block_size, unsigned char *result_buffer, enc_ret *ret){
+void PSQF_single(unsigned char *buffer, size_t N, size_t M, size_t block_size, unsigned char *result_buffer, enc_ret *ret){
     if (M > N) {
         M = N;
     }
@@ -16,7 +16,7 @@ void subSampleShuffle(unsigned char *buffer, size_t N, size_t M, size_t block_si
         return;
     }
     if (result_buffer == NULL) {
-        printf("subSampleShuffle: result_buffer is NULL\n");
+        printf("PSQF_single: result_buffer is NULL\n");
         return;
     }
 
@@ -38,7 +38,7 @@ void subSampleShuffle(unsigned char *buffer, size_t N, size_t M, size_t block_si
 
 }
 
-void decryptAndSubSampleShuffle(unsigned char *encrypted_buffer, size_t N, size_t M, size_t encrypted_block_size, unsigned char *encryt_result_buffer, enc_ret *ret) {
+void DecPSQF_single(unsigned char *encrypted_buffer, size_t N, size_t M, size_t encrypted_block_size, unsigned char *encryt_result_buffer, enc_ret *ret) {
     // Decrypt buffer to decrypted_buffer
     unsigned char *decrypted_buffer = NULL;
     size_t decrypted_block_size = decryptBuffer(encrypted_buffer, (uint64_t) N, encrypted_block_size, &decrypted_buffer);
@@ -57,13 +57,13 @@ void decryptAndSubSampleShuffle(unsigned char *encrypted_buffer, size_t N, size_
 
     unsigned char *result_buffer = (unsigned char *)malloc(M * decrypted_block_size);
     if (result_buffer == NULL) {
-        printf("Malloc failed in decryptAndSubSampleShuffle for %ld bytes\n", (M * decrypted_block_size));
+        printf("Malloc failed in DecPSQF_single for %ld bytes\n", (M * decrypted_block_size));
         free(decrypted_buffer);
         return;
     }
 
     PRB_pool_init(1);
-    subSampleShuffle(decrypted_buffer, N, M, decrypted_block_size, result_buffer, ret);
+    PSQF_single(decrypted_buffer, N, M, decrypted_block_size, result_buffer, ret);
 
     // encrytBuffer
     encryptBuffer(result_buffer, (uint64_t) M, decrypted_block_size, encryt_result_buffer);
@@ -73,7 +73,7 @@ void decryptAndSubSampleShuffle(unsigned char *encrypted_buffer, size_t N, size_
     free(result_buffer);
 }
 
-void subSampleSWO(unsigned char *buffer, size_t N, size_t M, size_t block_size, unsigned char *result_buffer, enc_ret *ret){
+void PSQF_SWO(unsigned char *buffer, size_t N, size_t M, size_t block_size, unsigned char *result_buffer, enc_ret *ret){
     if (M > N) {
         M = N;
     }
@@ -85,11 +85,11 @@ void subSampleSWO(unsigned char *buffer, size_t N, size_t M, size_t block_size, 
         return;
     }
     if (result_buffer == NULL) {
-        printf("subSampleSWO: result_buffer is NULL\n");
+        printf("PSQF_SWO: result_buffer is NULL\n");
         return;
     }
     if (N % M != 0) {
-        printf("subSampleSWO: N %% M != 0, falling back to single sample\n");
+        printf("PSQF_SWO: N %% M != 0, falling back to single sample\n");
         M = N;
     }
     size_t k = N / M;
@@ -112,7 +112,7 @@ void subSampleSWO(unsigned char *buffer, size_t N, size_t M, size_t block_size, 
     unsigned char *S = (unsigned char *)malloc(N * tuple_size);
     size_t *counts = (size_t *)calloc(k, sizeof(size_t));
     if (S == NULL || counts == NULL) {
-        printf("Allocating memory failed in subSampleSWO\n");
+        printf("Allocating memory failed in PSQF_SWO\n");
         free(S);
         free(counts);
         ret->ptime = 0.0;
@@ -146,7 +146,7 @@ void subSampleSWO(unsigned char *buffer, size_t N, size_t M, size_t block_size, 
 
     unsigned char *id_buf = (unsigned char *)malloc(id_plain_size);
     if (id_buf == NULL) {
-        printf("Allocating memory failed in subSampleSWO (id buffers)\n");
+        printf("Allocating memory failed in PSQF_SWO (id buffers)\n");
         free(S);
         free(counts);
         free(id_buf);
@@ -238,7 +238,7 @@ void subSampleSWO(unsigned char *buffer, size_t N, size_t M, size_t block_size, 
     free(id_buf);
 }
 
-void decryptAndSubSampleSWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t encrypted_block_size, unsigned char *encryt_result_buffer, enc_ret *ret){
+void DecPSQF_SWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t encrypted_block_size, unsigned char *encryt_result_buffer, enc_ret *ret){
     unsigned char *decrypted_buffer = NULL;
     size_t decrypted_block_size = decryptBuffer(encrypted_buffer, (uint64_t) N, encrypted_block_size, &decrypted_buffer);
 
@@ -255,7 +255,7 @@ void decryptAndSubSampleSWO(unsigned char *encrypted_buffer, size_t N, size_t M,
     }
 
     PRB_pool_init(1);
-    subSampleSWO(decrypted_buffer, N, M, decrypted_block_size, encryt_result_buffer, ret);
+    PSQF_SWO(decrypted_buffer, N, M, decrypted_block_size, encryt_result_buffer, ret);
     PRB_pool_shutdown();
 
     free(decrypted_buffer);

@@ -1,6 +1,7 @@
 
 #ifndef BEFTS_MODE
   #include <array>
+  #include <new>
   #include <sgx_tcrypto.h>
   #include "../oasm_lib.h"
   #include "../utils.hpp"
@@ -13,6 +14,28 @@ bool *selected_list;
 unsigned char *random_bytes_buffer = NULL;
 uint32_t *random_bytes_buffer_ptr;
 uint32_t *random_bytes_buffer_ptr_end;
+
+static bool *AcquireRecursiveShuffleSelectedScratch(uint64_t N) {
+  thread_local bool *scratch = nullptr;
+  thread_local uint64_t capacity = 0;
+
+  if (N == 0) {
+    return scratch;
+  }
+  if (N <= capacity) {
+    return scratch;
+  }
+
+  bool *new_scratch = new (std::nothrow) bool[N];
+  if (new_scratch == nullptr) {
+    return nullptr;
+  }
+
+  delete []scratch;
+  scratch = new_scratch;
+  capacity = N;
+  return scratch;
+}
 
 /*
   MarkHalf: Marks half of the elements of an N sized array randomly.
@@ -128,10 +151,26 @@ void RecursiveShuffle_M2(unsigned char *buf, uint64_t N, size_t block_size){
 
 void RecursiveShuffle_M2_parallel(unsigned char *buf, uint64_t N, size_t block_size, size_t nthreads){
   FOAV_SAFE2_CNTXT(RS_M2, N, block_size)
-  try {
-    selected_list = new bool[N]{};
-  } catch (std::bad_alloc&){
+  selected_list = AcquireRecursiveShuffleSelectedScratch(N);
+  if (selected_list == nullptr && N > 2) {
     printf("Allocating memory failed in RS_M2\n");
+    return;
+  }
+
+  if (nthreads <= 1) {
+    FOAV_SAFE_CNTXT(RS_M2_branching_on_block_size_for_OSwap_Style_templates, block_size)
+    if(block_size==4){
+      RecursiveShuffle_M2_inner<OSWAP_4>(buf, N, block_size, selected_list);
+    } else if(block_size==8){
+      RecursiveShuffle_M2_inner<OSWAP_8>(buf, N, block_size, selected_list);
+    } else if(block_size==12){
+      RecursiveShuffle_M2_inner<OSWAP_12>(buf, N, block_size, selected_list);
+    } else if(block_size%16==0) {
+      RecursiveShuffle_M2_inner<OSWAP_16X>(buf, N, block_size, selected_list);
+    } else {
+      RecursiveShuffle_M2_inner<OSWAP_8_16X>(buf, N, block_size, selected_list);
+    }
+    return;
   }
 
   threadpool_init(nthreads);
@@ -151,9 +190,6 @@ void RecursiveShuffle_M2_parallel(unsigned char *buf, uint64_t N, size_t block_s
   }
   
   threadpool_shutdown();
-
-  FOAV_SAFE_CNTXT(RecursiveShuffle_M2_delete, selected_list)
-  delete []selected_list;
 }
 
 // We maintain a double type return version of RecusiveShuffle_M2, 

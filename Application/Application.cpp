@@ -46,29 +46,30 @@ double calculateAve(const double *input, size_t N) {
 void parseCommandLineArguments(int argc, char *argv[]) {
   if (argc != (NUM_ARGUMENTS_REQUIRED + 1) && argc != (NUM_ARGUMENTS_REQUIRED + 2)) {
     printf("Did NOT receive the right number of command line arguments.\n"
-          "Usage: ./application <31|32|33> <N> <BLOCK_SIZE> <P> <REPEAT>\n"
-          "   or: ./application <34|35> <N> <BLOCK_SIZE> <P> <K> <REPEAT>\n\n"
-           "Oblivious SubSampling (31/32/33/34/35)\n"
-          "  (31) SubSampleShuffle (shuffle all then take first N*P)\n"
-           "  (32) SubSampleSWO (Algorithm 1)\n"
-          "  (33) SubSample (randomly select N*P items, then compact)\n"
-           "  (34) SubSampleMulti\n"
-           "  (35) SubSampleMulti_opt\n");
+          "Usage: ./application <1|2|3> <N> <BLOCK_SIZE> <P> <REPEAT>\n"
+          "   or: ./application <4|5|6> <N> <BLOCK_SIZE> <P> <K> <REPEAT>\n\n"
+           "Oblivious SubSampling (1/2/3/4/5/6)\n"
+          "  (1) PSQF_single (shuffle all then take first N*P)\n"
+           "  (2) PSQF_SWO (Algorithm 1)\n"
+          "  (3) SubSample (randomly select N*P items, then compact)\n"
+           "  (4) SubSampleMulti\n"
+           "  (5) SubSampleMulti_opt\n"
+           "  (6) SuppleSWO\n");
     exit(0);
   }
 
   MODE = atoi(argv[1]);
-  if (MODE != 31 && MODE != 32 && MODE != 33 && MODE != 34 && MODE != 35) {
-    printf("MODE must be 31, 32, 33, 34, or 35.\n");
+  if (MODE < 1 || MODE > 6) {
+    printf("MODE must be 1, 2, 3, 4, 5, or 6.\n");
     exit(0);
   }
 
-  if ((MODE == 34 || MODE == 35) && argc != (NUM_ARGUMENTS_REQUIRED + 2)) {
-    printf("MODE 34/35 expects K as an extra parameter.\n");
+  if ((MODE == 4 || MODE == 5 || MODE == 6) && argc != (NUM_ARGUMENTS_REQUIRED + 2)) {
+    printf("MODE 4/5/6 expects K as an extra parameter.\n");
     exit(0);
   }
-  if (MODE != 34 && MODE != 35 && argc != (NUM_ARGUMENTS_REQUIRED + 1)) {
-    printf("MODE 31/32/33 expects no K parameter.\n");
+  if (MODE != 4 && MODE != 5 && MODE != 6 && argc != (NUM_ARGUMENTS_REQUIRED + 1)) {
+    printf("MODE 1/2/3 expects no K parameter.\n");
     exit(0);
   }
 
@@ -83,7 +84,7 @@ void parseCommandLineArguments(int argc, char *argv[]) {
   if (M == 0) {
     M = 1;
   }
-  if (MODE == 34 || MODE == 35) {
+  if (MODE == 4 || MODE == 5 || MODE == 6) {
     K = atoi(argv[5]);
     REPEAT = atoi(argv[6]);
   } else {
@@ -93,8 +94,8 @@ void parseCommandLineArguments(int argc, char *argv[]) {
 
   // To ignore the first iteration, we perform the experiment REPEAT + 1 times
   REPEAT = REPEAT + 1;
-  if ((MODE == 34 || MODE == 35) && K == 0) {
-    printf("MODE 34/35 expects K > 0\n");
+  if ((MODE == 4 || MODE == 5 || MODE == 6) && K == 0) {
+    printf("MODE 4/5/6 expects K > 0\n");
     exit(0);
   }
   if (REPEAT < 2) {
@@ -202,7 +203,7 @@ int main(int argc, char *argv[]) {
 
   // Create buffer of items to shuffle
   size_t output_blocks = N;
-  if (MODE == 34 || MODE == 35) {
+  if (MODE == 4 || MODE == 5 || MODE == 6) {
     output_blocks = SampleSize * K;
   }
   size_t total_blocks = (output_blocks > N) ? output_blocks : N;
@@ -288,8 +289,8 @@ int main(int argc, char *argv[]) {
 
     enc_ret ret;
     switch (MODE) {
-      case 31:
-        decryptAndSubSampleShuffle(buf, N, SampleSize, ENC_BLOCK_SIZE, buf, &ret);
+      case 1:
+        DecPSQF_single(buf, N, SampleSize, ENC_BLOCK_SIZE, buf, &ret);
         ptime_array[r] = ret.ptime;
 #ifdef COUNT_OSWAPS
         num_oswaps[r] = ret.OSWAP_count;
@@ -298,8 +299,8 @@ int main(int argc, char *argv[]) {
 #endif
         break;
 
-      case 32:
-        decryptAndSubSampleSWO(buf, N, SampleSize, ENC_BLOCK_SIZE, buf, &ret);
+      case 2:
+        DecPSQF_SWO(buf, N, SampleSize, ENC_BLOCK_SIZE, buf, &ret);
         ptime_array[r] = ret.ptime;
 #ifdef COUNT_OSWAPS
         num_oswaps[r] = ret.OSWAP_count;
@@ -308,7 +309,7 @@ int main(int argc, char *argv[]) {
 #endif
         break;
 
-      case 33:
+      case 3:
         decryptAndSubSample(buf, N, SampleSize, ENC_BLOCK_SIZE, buf, &ret);
         ptime_array[r] = ret.ptime;
 #ifdef COUNT_OSWAPS
@@ -318,7 +319,7 @@ int main(int argc, char *argv[]) {
 #endif
         break;
 
-      case 34:
+      case 4:
         decryptAndSubSampleMulti(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
         ptime_array[r] = ret.ptime;
         gen_perm_time_array[r] = ret.gen_perm_time;
@@ -330,8 +331,20 @@ int main(int argc, char *argv[]) {
       #endif
         break;
 
-      case 35:
+      case 5:
         decryptAndSubSampleMulti_opt(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
+        ptime_array[r] = ret.ptime;
+        gen_perm_time_array[r] = ret.gen_perm_time;
+        apply_perm_time_array[r] = ret.apply_perm_time;
+      #ifdef COUNT_OSWAPS
+        num_oswaps[r] = ret.OSWAP_count;
+      #else
+        num_oswaps[r] = 0;
+      #endif
+        break;
+
+      case 6:
+        DecSuppleSWO(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
         ptime_array[r] = ret.ptime;
         gen_perm_time_array[r] = ret.gen_perm_time;
         apply_perm_time_array[r] = ret.apply_perm_time;
@@ -359,9 +372,9 @@ int main(int argc, char *argv[]) {
     int cnum = 0;
 
     size_t output_blocks = N;
-    if (MODE == 31 || MODE == 33) {
+    if (MODE == 1 || MODE == 3) {
       output_blocks = SampleSize;
-    } else if (MODE == 34 || MODE == 35) {
+    } else if (MODE == 4 || MODE == 5 || MODE == 6) {
       output_blocks = SampleSize * K;
     }
     unsigned char *decrypted_result_buf_ptr = buf;
@@ -411,7 +424,7 @@ int main(int argc, char *argv[]) {
   printf("%f\n", ecallTime_average);
   printf("%f\n", ptime_average);
 
-  if (MODE == 34 || MODE == 35) {
+  if (MODE == 4 || MODE == 5 || MODE == 6) {
     double gen_perm_time_average = calculateAve(gen_perm_time_array + 1, REPEAT - 1);
     double apply_perm_time_average = calculateAve(apply_perm_time_array + 1, REPEAT - 1);
     printf("%f\n", gen_perm_time_average);
