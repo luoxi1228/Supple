@@ -14,6 +14,8 @@ constexpr size_t SwoWordBits()
 
 size_t MarkWords(size_t k);
 
+size_t WorkspaceDepth(size_t k);
+
 struct SwoMarkWorkspace
 {
   std::vector<size_t> mark_buf;
@@ -71,24 +73,19 @@ struct SwoDataWorkspace
   }
 };
 
-inline bool MulOverflowSizeT(size_t a, size_t b, size_t *out)
+struct MarkSliceRange
 {
-  if (out == nullptr)
-  {
-    return true;
-  }
-  if (a == 0 || b == 0)
-  {
-    *out = 0;
-    return false;
-  }
-  if (a > (SIZE_MAX / b))
-  {
-    return true;
-  }
-  *out = a * b;
-  return false;
-}
+  size_t slice_start = 0;
+  size_t slice_bits = 0;
+  size_t dst_words = 0;
+  size_t first_word = 0;
+  size_t last_word = 0;
+  size_t first_mask = 0;
+  size_t last_mask = 0;
+  bool valid = false;
+};
+
+bool MulOverflowSizeT(size_t a, size_t b, size_t *out);
 
 bool AddOverflowSizeT(size_t a, size_t b, size_t *out);
 
@@ -123,6 +120,61 @@ bool RowHasSliceBit(const size_t *row,
                     size_t row_words,
                     size_t slice_start,
                     size_t slice_bits);
+
+bool MakeMarkSliceRange(size_t row_words,
+                        size_t slice_start,
+                        size_t slice_bits,
+                        MarkSliceRange *range);
+
+bool RowHasSliceBitOblivious(const size_t *row,
+                             size_t row_words,
+                             size_t slice_start,
+                             size_t slice_bits);
+
+bool RowHasSliceBitInRange(const size_t *row,
+                           const MarkSliceRange &range);
+
+bool RowHasSliceBitFast(const size_t *row,
+                        size_t row_words,
+                        size_t slice_start,
+                        size_t slice_bits);
+
+size_t ProjectMarkSliceOneWord(const size_t *src_row,
+                               size_t src_words,
+                               size_t slice_start,
+                               size_t slice_bits);
+
+void CompactMarkToWorkspace(const size_t *mark,
+                            size_t len_items,
+                            size_t src_mark_words,
+                            const bool *selected,
+                            size_t target_size,
+                            size_t slice_start,
+                            size_t slice_bits,
+                            SwoMarkWorkspace &ws);
+
+void CompactMarkToWorkspaceAndControl(const size_t *mark,
+                                      size_t len_items,
+                                      size_t src_mark_words,
+                                      bool *selected,
+                                      size_t target_size,
+                                      const MarkSliceRange &slice_range,
+                                      std::vector<uint8_t> &C,
+                                      size_t bit_pos,
+                                      SwoMarkWorkspace &ws);
+
+void CompactDataToWorkspace(const unsigned char *data,
+                            size_t len_items,
+                            const bool *selected,
+                            size_t target_size,
+                            size_t block_size,
+                            SwoDataWorkspace &ws);
+
+size_t CompactDataInPlace(unsigned char *data,
+                          size_t len_items,
+                          const bool *selected,
+                          size_t target_size,
+                          size_t block_size);
 
 std::vector<bool> ControlSliceToSelected(const std::vector<uint8_t> &C,
                                          size_t p,

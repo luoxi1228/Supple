@@ -49,7 +49,9 @@ unsigned long ocall_print_string_with_rtclock_diff(const char *str, unsigned lon
 }
 
 long ocall_clock() {
-    return (long)clock();
+    struct timespec tp;
+    clock_gettime(CLOCK_MONOTONIC, &tp);
+    return (long)(tp.tv_sec * 1000000L + tp.tv_nsec / 1000L);
 }
 
 // Returns wallclock time taken between a start (0) and stop flag(1)
@@ -477,6 +479,11 @@ void DecPSQF_SWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t enc
 void DecSuppleSWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size,
   unsigned char *encrypt_result_buffer, enc_ret *ret) {
   DecSuppleSWO(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret);
+}
+
+void DecSuppleSWO_parallel(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size,
+  unsigned char *encrypt_result_buffer, enc_ret *ret, size_t nthreads) {
+  DecSuppleSWO_parallel(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret, nthreads);
 }
 
 void RecursiveShuffle_M1(unsigned char *buf, uint64_t N, size_t block_size) {

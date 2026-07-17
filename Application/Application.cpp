@@ -15,8 +15,6 @@
 #include "gcm.h"
 
 #define NUM_ARGUMENTS_REQUIRED 5
-#define CLOCKS_PER_MS (CLOCKS_PER_SEC / 1000)
-
 // IV = 12 bytes, TAG = 16 bytes for AES-GCM
 // So data component needs to be at least >28 bytes large to do 0-encrypted integrity check
 // We use 40 as it is the next fit for the block sizes supported by our library.
@@ -30,6 +28,7 @@ size_t M;
 size_t K;
 size_t BLOCK_SIZE;
 size_t REPEAT;
+size_t NTHREADS = 1;
 
 uint64_t NUM_ZERO_BYTES;
 unsigned char *zeroes = nullptr;
@@ -44,23 +43,27 @@ double calculateAve(const double *input, size_t N) {
 }
 
 void parseCommandLineArguments(int argc, char *argv[]) {
-  if (argc != (NUM_ARGUMENTS_REQUIRED + 1) && argc != (NUM_ARGUMENTS_REQUIRED + 2)) {
+  if (argc != (NUM_ARGUMENTS_REQUIRED + 1) &&
+      argc != (NUM_ARGUMENTS_REQUIRED + 2) &&
+      argc != (NUM_ARGUMENTS_REQUIRED + 3)) {
     printf("Did NOT receive the right number of command line arguments.\n"
           "Usage: ./application <1|2|3> <N> <BLOCK_SIZE> <P> <REPEAT>\n"
-          "   or: ./application <4|5|6> <N> <BLOCK_SIZE> <P> <K> <REPEAT>\n\n"
-           "Oblivious SubSampling (1/2/3/4/5/6)\n"
+          "   or: ./application <4|5|6> <N> <BLOCK_SIZE> <P> <K> <REPEAT>\n"
+          "   or: ./application <7> <N> <BLOCK_SIZE> <P> <K> <NTHREADS> <REPEAT>\n\n"
+           "Oblivious SubSampling (1/2/3/4/5/6/7)\n"
           "  (1) PSQF_single (shuffle all then take first N*P)\n"
            "  (2) PSQF_SWO (Algorithm 1)\n"
           "  (3) SubSample (randomly select N*P items, then compact)\n"
            "  (4) SubSampleMulti\n"
            "  (5) SubSampleMulti_opt\n"
-           "  (6) SuppleSWO\n");
+           "  (6) SuppleSWO\n"
+           "  (7) SuppleSWO_parallel\n");
     exit(0);
   }
 
   MODE = atoi(argv[1]);
-  if (MODE < 1 || MODE > 6) {
-    printf("MODE must be 1, 2, 3, 4, 5, or 6.\n");
+  if (MODE < 1 || MODE > 7) {
+    printf("MODE must be 1, 2, 3, 4, 5, 6, or 7.\n");
     exit(0);
   }
 
@@ -68,7 +71,11 @@ void parseCommandLineArguments(int argc, char *argv[]) {
     printf("MODE 4/5/6 expects K as an extra parameter.\n");
     exit(0);
   }
-  if (MODE != 4 && MODE != 5 && MODE != 6 && argc != (NUM_ARGUMENTS_REQUIRED + 1)) {
+  if (MODE == 7 && argc != (NUM_ARGUMENTS_REQUIRED + 3)) {
+    printf("MODE 7 expects K and NTHREADS as extra parameters.\n");
+    exit(0);
+  }
+  if (MODE != 4 && MODE != 5 && MODE != 6 && MODE != 7 && argc != (NUM_ARGUMENTS_REQUIRED + 1)) {
     printf("MODE 1/2/3 expects no K parameter.\n");
     exit(0);
   }
@@ -87,15 +94,24 @@ void parseCommandLineArguments(int argc, char *argv[]) {
   if (MODE == 4 || MODE == 5 || MODE == 6) {
     K = atoi(argv[5]);
     REPEAT = atoi(argv[6]);
+  } else if (MODE == 7) {
+    K = atoi(argv[5]);
+    NTHREADS = atoi(argv[6]);
+    REPEAT = atoi(argv[7]);
   } else {
     K = 0;
+    NTHREADS = 1;
     REPEAT = atoi(argv[5]);
   }
 
   // To ignore the first iteration, we perform the experiment REPEAT + 1 times
   REPEAT = REPEAT + 1;
-  if ((MODE == 4 || MODE == 5 || MODE == 6) && K == 0) {
-    printf("MODE 4/5/6 expects K > 0\n");
+  if ((MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7) && K == 0) {
+    printf("MODE 4/5/6/7 expects K > 0\n");
+    exit(0);
+  }
+  if (MODE == 7 && NTHREADS == 0) {
+    printf("MODE 7 expects NTHREADS > 0\n");
     exit(0);
   }
   if (REPEAT < 2) {
@@ -108,7 +124,7 @@ void parseCommandLineArguments(int argc, char *argv[]) {
 uint64_t rtclock() {
   static time_t secstart = 0;
   struct timespec tp;
-  clock_gettime(CLOCK_REALTIME, &tp);
+  clock_gettime(CLOCK_MONOTONIC, &tp);
   if (secstart == 0) {
     secstart = tp.tv_sec;
   }
@@ -116,7 +132,7 @@ uint64_t rtclock() {
 }
 
 int main(int argc, char *argv[]) {
-  clock_t process_start, process_stop;
+  uint64_t process_start, process_stop;
   double ecall_time;
 
   bool verbose_phases = !!getenv("VERBOSE_PHASES");
@@ -203,7 +219,7 @@ int main(int argc, char *argv[]) {
 
   // Create buffer of items to shuffle
   size_t output_blocks = N;
-  if (MODE == 4 || MODE == 5 || MODE == 6) {
+  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7) {
     output_blocks = SampleSize * K;
   }
   size_t total_blocks = (output_blocks > N) ? output_blocks : N;
@@ -285,7 +301,7 @@ int main(int argc, char *argv[]) {
     }
     phase_start = phase_end;
 
-    process_start = clock();
+    process_start = rtclock();
 
     enc_ret ret;
     switch (MODE) {
@@ -354,10 +370,22 @@ int main(int argc, char *argv[]) {
         num_oswaps[r] = 0;
       #endif
         break;
-    }
-    process_stop = clock();
 
-    ecall_time = double(process_stop - process_start) / double(CLOCKS_PER_MS);
+      case 7:
+        DecSuppleSWO_parallel(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret, NTHREADS);
+        ptime_array[r] = ret.ptime;
+        gen_perm_time_array[r] = ret.gen_perm_time;
+        apply_perm_time_array[r] = ret.apply_perm_time;
+      #ifdef COUNT_OSWAPS
+        num_oswaps[r] = ret.OSWAP_count;
+      #else
+        num_oswaps[r] = 0;
+      #endif
+        break;
+    }
+    process_stop = rtclock();
+
+    ecall_time = double(process_stop - process_start) / 1000.0;
     ecallTime_array[r] = ecall_time;
 
     phase_end = rtclock();
@@ -374,7 +402,7 @@ int main(int argc, char *argv[]) {
     size_t output_blocks = N;
     if (MODE == 1 || MODE == 3) {
       output_blocks = SampleSize;
-    } else if (MODE == 4 || MODE == 5 || MODE == 6) {
+    } else if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7) {
       output_blocks = SampleSize * K;
     }
     unsigned char *decrypted_result_buf_ptr = buf;
@@ -424,7 +452,7 @@ int main(int argc, char *argv[]) {
   printf("%f\n", ecallTime_average);
   printf("%f\n", ptime_average);
 
-  if (MODE == 4 || MODE == 5 || MODE == 6) {
+  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7) {
     double gen_perm_time_average = calculateAve(gen_perm_time_array + 1, REPEAT - 1);
     double apply_perm_time_average = calculateAve(apply_perm_time_array + 1, REPEAT - 1);
     printf("%f\n", gen_perm_time_average);

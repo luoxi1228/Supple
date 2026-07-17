@@ -136,7 +136,7 @@ SGXSSL_INCLUDE_PATH := /opt/intel/sgxssl/include/
 Enclave_Cpp_Files := Enclave/Enclave.cpp Enclave/utils.cpp Enclave/RecursiveShuffle/RecursiveShuffle.cpp \
 		Enclave/ObliviousPrimitives.cpp Enclave/TightCompaction/TightCompaction.cpp Enclave/TightCompaction/TightCompaction_v2.cpp \
 		Enclave/SubSample/SubSample.cpp Enclave/PSQF19/SWO/PSQF_SWO.cpp \
-		Enclave/SubSample_v2/SWO/SuppleSWO.cpp Enclave/SubSample_v2/SWO/helper.cpp \
+		Enclave/SubSample_v2/SWO/SuppleSWO.cpp Enclave/SubSample_v2/SWO/SuppleSWO_parallel.cpp Enclave/SubSample_v2/SWO/helper.cpp \
 		$(wildcard Enclave/Edger8rSyntax/*.cpp) $(wildcard Enclave/TrustedLibrary/*.cpp)
 
 Enclave_Include_Paths := -IInclude -IEnclave -I$(SGX_SDK)/include -I$(SGX_SDK)/include/libcxx -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/stlport -I$(SGXSSL_INCLUDE_PATH)

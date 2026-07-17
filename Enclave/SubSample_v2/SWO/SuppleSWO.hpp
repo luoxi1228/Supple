@@ -51,6 +51,17 @@ size_t CONTROLWRITE(const std::vector<size_t> &M,
                     size_t k,
                     size_t p);
 
+size_t CONTROLWRITE_WORKSPACE(const size_t *M,
+                              size_t n,
+                              size_t mark_words,
+                              std::vector<uint8_t> &C,
+                              const std::vector<FrontierNode> &F,
+                              size_t m,
+                              size_t k,
+                              size_t p,
+                              std::vector<SwoMarkWorkspace> &workspaces,
+                              size_t depth);
+
 std::vector<unsigned char> RECSAMPLE(const unsigned char *D,
                                      const std::vector<uint8_t> &C,
                                      const std::vector<FrontierNode> &F,
@@ -69,6 +80,19 @@ ControlReadResult CONTROLREAD(unsigned char *D,
                               unsigned char *S,
                               size_t out_capacity_blocks,
                               size_t p);
+
+ControlReadResult CONTROLREAD_WORKSPACE(unsigned char *D,
+                                        const std::vector<uint8_t> &C,
+                                        const std::vector<FrontierNode> &F,
+                                        size_t n,
+                                        size_t m,
+                                        size_t k,
+                                        size_t block_size,
+                                        unsigned char *S,
+                                        size_t out_capacity_blocks,
+                                        size_t p,
+                                        std::vector<SwoDataWorkspace> &workspaces,
+                                        size_t depth);
 
 std::vector<unsigned char> FILTERDATA(const unsigned char *D,
                                       const std::vector<uint8_t> &Cv,
