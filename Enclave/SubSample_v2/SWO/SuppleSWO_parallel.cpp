@@ -186,6 +186,41 @@ size_t SelectFrontierWorkers(size_t requested,
                                    memory_workers));
 }
 
+struct FrontierThreadGroup
+{
+  size_t thread_offset;
+  size_t thread_count;
+  size_t layout_begin;
+  size_t layout_end;
+};
+
+std::vector<FrontierThreadGroup> BuildFrontierThreadGroups(
+    size_t nthreads,
+    size_t layout_count,
+    size_t active_groups)
+{
+  active_groups = std::max<size_t>(1,
+                                   std::min(std::min(nthreads, layout_count),
+                                            active_groups));
+  std::vector<FrontierThreadGroup> groups;
+  groups.reserve(active_groups);
+
+  size_t thread_offset = 0;
+  for (size_t group = 0; group < active_groups; group++)
+  {
+    const size_t thread_count =
+        (nthreads / active_groups) + (group < (nthreads % active_groups) ? 1 : 0);
+    FrontierThreadGroup entry;
+    entry.thread_offset = thread_offset;
+    entry.thread_count = thread_count;
+    entry.layout_begin = (layout_count * group) / active_groups;
+    entry.layout_end = (layout_count * (group + 1)) / active_groups;
+    groups.push_back(entry);
+    thread_offset += thread_count;
+  }
+  return groups;
+}
+
 bool CanWriteLayoutsConcurrently(const std::vector<ChildLayout> &layouts)
 {
   for (size_t i = 0; i + 1 < layouts.size(); i++)
@@ -651,6 +686,7 @@ size_t ProcessWriteLayoutRange(const size_t *M,
                                size_t m,
                                std::vector<SwoParallelWorkspaceContext> &contexts,
                                size_t depth,
+                               size_t nthreads,
                                const std::vector<ControlNumMemoEntry> &memo);
 
 struct ControlWriteTaskArgs
@@ -732,6 +768,7 @@ struct ControlWriteRangeTaskArgs
   size_t m;
   std::vector<SwoParallelWorkspaceContext> *contexts;
   size_t depth;
+  size_t nthreads;
   const std::vector<ControlNumMemoEntry> *memo;
   size_t next_pos;
 };
@@ -750,6 +787,7 @@ void *ControlWriteRangeTaskLaunch(void *raw_args)
                                            args->m,
                                            *args->contexts,
                                            args->depth,
+                                           args->nthreads,
                                            *args->memo);
   return nullptr;
 }
@@ -1006,46 +1044,52 @@ size_t ControlWriteParallelWorkspace(const size_t *M,
       return SerialControlWriteFromPointer(M, n, mark_words, C, F, m, k, p);
     }
 
-    const size_t workers =
+    const size_t active_groups =
         SelectFrontierWorkers(nthreads, layouts.size(), n, mark_block_size);
-    if (workers > 1)
+    if (active_groups >= 1)
     {
-      std::vector<ControlWriteRangeTaskArgs> tasks(workers - 1);
-      for (size_t worker = 1; worker < workers; worker++)
+      const std::vector<FrontierThreadGroup> groups =
+          BuildFrontierThreadGroups(nthreads, layouts.size(), active_groups);
+      std::vector<ControlWriteRangeTaskArgs> tasks(groups.size() - 1);
+      for (size_t group = 1; group < groups.size(); group++)
       {
-        ControlWriteRangeTaskArgs &args = tasks[worker - 1];
+        const FrontierThreadGroup &allocation = groups[group];
+        ControlWriteRangeTaskArgs &args = tasks[group - 1];
         args.M = M;
         args.n = n;
         args.mark_words = mark_words;
         args.C = &C;
         args.layouts = &layouts;
-        args.begin = (layouts.size() * worker) / workers;
-        args.end = (layouts.size() * (worker + 1)) / workers;
+        args.begin = allocation.layout_begin;
+        args.end = allocation.layout_end;
         args.m = m;
         args.contexts = &contexts;
         args.depth = depth;
+        args.nthreads = allocation.thread_count;
         args.memo = &memo;
         args.next_pos = p;
-        threadpool_dispatch(g_thread_id + worker,
+        threadpool_dispatch(g_thread_id + allocation.thread_offset,
                             ControlWriteRangeTaskLaunch,
                             &args);
       }
 
+      const FrontierThreadGroup &local_group = groups[0];
       (void)ProcessWriteLayoutRange(M,
                                     n,
                                     mark_words,
                                     C,
                                     layouts,
-                                    0,
-                                    layouts.size() / workers,
+                                    local_group.layout_begin,
+                                    local_group.layout_end,
                                     m,
                                     contexts,
                                     depth,
+                                    local_group.thread_count,
                                     memo);
 
-      for (size_t worker = 1; worker < workers; worker++)
+      for (size_t group = 1; group < groups.size(); group++)
       {
-        threadpool_join(g_thread_id + worker, nullptr);
+        threadpool_join(g_thread_id + groups[group].thread_offset, nullptr);
       }
       return layouts.back().child_pos + layouts.back().child_bits;
     }
@@ -1306,19 +1350,22 @@ ControlReadResult ControlReadParallelWorkspace(unsigned char *D,
 
   if (V.size() > 2 && nthreads > 1)
   {
-    const size_t workers =
+    const size_t active_groups =
         SelectFrontierWorkers(nthreads, layouts.size(), n, block_size);
-    if (workers > 1)
+    if (active_groups >= 1)
     {
-      std::vector<ControlReadRangeTaskArgs> tasks(workers - 1);
-      for (size_t worker = 1; worker < workers; worker++)
+      const std::vector<FrontierThreadGroup> groups =
+          BuildFrontierThreadGroups(nthreads, layouts.size(), active_groups);
+      std::vector<ControlReadRangeTaskArgs> tasks(groups.size() - 1);
+      for (size_t group = 1; group < groups.size(); group++)
       {
-        ControlReadRangeTaskArgs &args = tasks[worker - 1];
+        const FrontierThreadGroup &allocation = groups[group];
+        ControlReadRangeTaskArgs &args = tasks[group - 1];
         args.D = D;
         args.C = &C;
         args.layouts = &layouts;
-        args.begin = (layouts.size() * worker) / workers;
-        args.end = (layouts.size() * (worker + 1)) / workers;
+        args.begin = allocation.layout_begin;
+        args.end = allocation.layout_end;
         args.n = n;
         args.m = m;
         args.block_size = block_size;
@@ -1326,20 +1373,21 @@ ControlReadResult ControlReadParallelWorkspace(unsigned char *D,
         args.out_capacity_blocks = out_capacity_blocks;
         args.contexts = &contexts;
         args.depth = depth;
-        args.nthreads = 1;
+        args.nthreads = allocation.thread_count;
         args.memo = &memo;
         args.result = ControlReadResult{0, p};
-        threadpool_dispatch(g_thread_id + worker,
+        threadpool_dispatch(g_thread_id + allocation.thread_offset,
                             ControlReadRangeTaskLaunch,
                             &args);
       }
 
+      const FrontierThreadGroup &local_group = groups[0];
       ControlReadResult local =
           ProcessReadLayoutRange(D,
                                  C,
                                  layouts,
-                                 0,
-                                 layouts.size() / workers,
+                                 local_group.layout_begin,
+                                 local_group.layout_end,
                                  n,
                                  m,
                                  block_size,
@@ -1347,14 +1395,14 @@ ControlReadResult ControlReadParallelWorkspace(unsigned char *D,
                                  out_capacity_blocks,
                                  contexts,
                                  depth,
-                                 1,
+                                 local_group.thread_count,
                                  memo);
 
       size_t written_total = local.written_blocks;
-      for (size_t worker = 1; worker < workers; worker++)
+      for (size_t group = 1; group < groups.size(); group++)
       {
-        threadpool_join(g_thread_id + worker, nullptr);
-        written_total += tasks[worker - 1].result.written_blocks;
+        threadpool_join(g_thread_id + groups[group].thread_offset, nullptr);
+        written_total += tasks[group - 1].result.written_blocks;
       }
 
       result.written_blocks = written_total;
@@ -1563,6 +1611,7 @@ size_t ProcessWriteLayoutRange(const size_t *M,
                                size_t m,
                                std::vector<SwoParallelWorkspaceContext> &contexts,
                                size_t depth,
+                               size_t nthreads,
                                const std::vector<ControlNumMemoEntry> &memo)
 {
   end = std::min(end, layouts.size());
@@ -1577,7 +1626,7 @@ size_t ProcessWriteLayoutRange(const size_t *M,
                                     m,
                                     contexts,
                                     depth,
-                                    1,
+                                    nthreads,
                                     memo);
   }
   return next_pos;

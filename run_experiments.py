@@ -39,7 +39,7 @@ DEFAULT_K = [16, 64, 256, 1024]
 DEFAULT_K_SELECT = 2   # 1 => k = 1/p, 2 => use --k list
 DEFAULT_BLOCK_SIZE = [16]
 DEFAULT_REPEAT = 10
-DEFAULT_THREADS = available_cpu_count()
+DEFAULT_THREADS = 4 #available_cpu_count()
 
 BASE_HEAP = 1000000
 SIZE_T_BYTES = int(os.getenv("SIZE_T_BYTES", "8"))
