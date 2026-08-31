@@ -72,6 +72,13 @@ enclave {
     //public void Enclave_testMT(size_t thread_id);
     //Test Functions:
     public double MeasureOSWAPBuffer([user_check] unsigned char *buf, size_t N, size_t block_size);
+    public double MeasureObliviousPrimitive(
+        [user_check] unsigned char *buf,
+        size_t pairs,
+        size_t block_size,
+        uint8_t primitive,
+        uint8_t flag0,
+        uint8_t flag1);
 
   };
 

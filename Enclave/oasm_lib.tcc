@@ -390,4 +390,212 @@ omove_buffer:
 	ret
 */
 
+// ======================== OFork BEGIN ========================
+// In-place oblivious fork:
+//   x = original *dest, y = original *source
+//   *dest   = flag0 ? y : x
+//   *source = flag1 ? y : x
+//
+//   00 -> (x, x), 01 -> (x, y)
+//   10 -> (y, x), 11 -> (y, y)
+//
+// Both inputs are loaded before either output is written. The secret flags
+// affect only TEST/CMOV instructions and never affect memory addresses.
+
+template<> inline void ofork_buffer<OFORK_4>(unsigned char *dest, unsigned char *source,
+                                              uint32_t buffersize, uint8_t flag0, uint8_t flag1)
+{
+    // Backward-compatible instrumentation: one OFork is counted as one
+    // oblivious switching primitive in the existing OSWAP_COUNTER.
+    #ifdef COUNT_OSWAPS
+      OSWAP_COUNTER++;
+    #endif
+
+    (void)buffersize;
+    __asm__ volatile (
+        "# inline ofork_buffer<OFORK_4>\n"
+        "movl (%[dest]), %%r10d\n"
+        "movl (%[source]), %%ecx\n"
+        "movl %%r10d, %%r11d\n"
+        "test %[flag0], %[flag0]\n"
+        "cmovnz %%ecx, %%r10d\n"
+        "test %[flag1], %[flag1]\n"
+        "cmovnz %%ecx, %%r11d\n"
+        "movl %%r10d, (%[dest])\n"
+        "movl %%r11d, (%[source])\n"
+        :
+        : [dest] "r" (dest), [source] "r" (source),
+          [flag0] "r" (flag0), [flag1] "r" (flag1)
+        : "cc", "memory", "r10", "r11", "ecx"
+    );
+}
+
+template<> inline void ofork_buffer<OFORK_8>(unsigned char *dest, unsigned char *source,
+                                              uint32_t buffersize, uint8_t flag0, uint8_t flag1)
+{
+    #ifdef COUNT_OSWAPS
+      OSWAP_COUNTER++;
+    #endif
+
+    (void)buffersize;
+    __asm__ volatile (
+        "# inline ofork_buffer<OFORK_8>\n"
+        "movq (%[dest]), %%r10\n"
+        "movq (%[source]), %%rcx\n"
+        "movq %%r10, %%r11\n"
+        "test %[flag0], %[flag0]\n"
+        "cmovnz %%rcx, %%r10\n"
+        "test %[flag1], %[flag1]\n"
+        "cmovnz %%rcx, %%r11\n"
+        "movq %%r10, (%[dest])\n"
+        "movq %%r11, (%[source])\n"
+        :
+        : [dest] "r" (dest), [source] "r" (source),
+          [flag0] "r" (flag0), [flag1] "r" (flag1)
+        : "cc", "memory", "r10", "r11", "rcx"
+    );
+}
+
+template<> inline void ofork_buffer<OFORK_12>(unsigned char *dest, unsigned char *source,
+                                               uint32_t buffersize, uint8_t flag0, uint8_t flag1)
+{
+    #ifdef COUNT_OSWAPS
+      OSWAP_COUNTER++;
+    #endif
+
+    (void)buffersize;
+    __asm__ volatile (
+        "# inline ofork_buffer<OFORK_12>\n"
+        "movq (%[dest]), %%r14\n"
+        "movl 8(%[dest]), %%ebx\n"
+        "movq (%[source]), %%r15\n"
+        "movl 8(%[source]), %%r13d\n"
+        "movq %%r14, %%r12\n"
+        "movl %%ebx, %%edx\n"
+        "test %[flag0], %[flag0]\n"
+        "cmovnz %%r15, %%r14\n"
+        "cmovnz %%r13d, %%ebx\n"
+        "test %[flag1], %[flag1]\n"
+        "cmovnz %%r15, %%r12\n"
+        "cmovnz %%r13d, %%edx\n"
+        "movq %%r14, (%[dest])\n"
+        "movl %%ebx, 8(%[dest])\n"
+        "movq %%r12, (%[source])\n"
+        "movl %%edx, 8(%[source])\n"
+        :
+        : [dest] "r" (dest), [source] "r" (source),
+          [flag0] "r" (flag0), [flag1] "r" (flag1)
+        : "cc", "memory", "r12", "r13", "r14", "r15", "rbx", "rdx"
+    );
+}
+
+template<> inline void ofork_buffer<OFORK_16X>(unsigned char *dest, unsigned char *source,
+                                                uint32_t buffersize, uint8_t flag0, uint8_t flag1)
+{
+    #ifdef COUNT_OSWAPS
+      OSWAP_COUNTER++;
+    #endif
+
+    __asm__ volatile (
+        "# inline ofork_buffer<OFORK_16X>\n"
+        "movq %[dest], %%r10\n"
+        "movq %[source], %%r11\n"
+        "movl %[buffersize], %%ecx\n"
+        "shr $4, %%ecx\n"
+        "1:\n"
+          "movq (%%r10), %%r14\n"
+          "movq 8(%%r10), %%rbx\n"
+          "movq (%%r11), %%r15\n"
+          "movq 8(%%r11), %%r13\n"
+          "movq %%r14, %%r12\n"
+          "movq %%rbx, %%rdx\n"
+          "test %[flag0], %[flag0]\n"
+          "cmovnz %%r15, %%r14\n"
+          "cmovnz %%r13, %%rbx\n"
+          "test %[flag1], %[flag1]\n"
+          "cmovnz %%r15, %%r12\n"
+          "cmovnz %%r13, %%rdx\n"
+          "movq %%r14, (%%r10)\n"
+          "movq %%rbx, 8(%%r10)\n"
+          "movq %%r12, (%%r11)\n"
+          "movq %%rdx, 8(%%r11)\n"
+          "add $16, %%r10\n"
+          "add $16, %%r11\n"
+          "dec %%ecx\n"
+          "jnz 1b\n"
+        :
+        : [dest] "r" (dest), [source] "r" (source),
+          [buffersize] "r" (buffersize),
+          [flag0] "r" (flag0), [flag1] "r" (flag1)
+        : "cc", "memory", "r10", "r11", "rcx", "r12", "r13", "r14", "r15", "rbx", "rdx"
+    );
+}
+
+template<> inline void ofork_buffer<OFORK_8_16X>(unsigned char *dest, unsigned char *source,
+                                                  uint32_t buffersize, uint8_t flag0, uint8_t flag1)
+{
+    #ifdef COUNT_OSWAPS
+      OSWAP_COUNTER++;
+    #endif
+
+    __asm__ volatile (
+        "# inline ofork_buffer<OFORK_8_16X>\n"
+        "movq %[dest], %%r10\n"
+        "movq %[source], %%r11\n"
+        "movq (%%r10), %%r14\n"
+        "movq (%%r11), %%r15\n"
+        "movq %%r14, %%r12\n"
+        "test %[flag0], %[flag0]\n"
+        "cmovnz %%r15, %%r14\n"
+        "test %[flag1], %[flag1]\n"
+        "cmovnz %%r15, %%r12\n"
+        "movq %%r14, (%%r10)\n"
+        "movq %%r12, (%%r11)\n"
+        "add $8, %%r10\n"
+        "add $8, %%r11\n"
+        "movl %[buffersize], %%ecx\n"
+        "shr $4, %%ecx\n"
+        "1:\n"
+          "movq (%%r10), %%r14\n"
+          "movq 8(%%r10), %%rbx\n"
+          "movq (%%r11), %%r15\n"
+          "movq 8(%%r11), %%r13\n"
+          "movq %%r14, %%r12\n"
+          "movq %%rbx, %%rdx\n"
+          "test %[flag0], %[flag0]\n"
+          "cmovnz %%r15, %%r14\n"
+          "cmovnz %%r13, %%rbx\n"
+          "test %[flag1], %[flag1]\n"
+          "cmovnz %%r15, %%r12\n"
+          "cmovnz %%r13, %%rdx\n"
+          "movq %%r14, (%%r10)\n"
+          "movq %%rbx, 8(%%r10)\n"
+          "movq %%r12, (%%r11)\n"
+          "movq %%rdx, 8(%%r11)\n"
+          "add $16, %%r10\n"
+          "add $16, %%r11\n"
+          "dec %%ecx\n"
+          "jnz 1b\n"
+        :
+        : [dest] "r" (dest), [source] "r" (source),
+          [buffersize] "r" (buffersize),
+          [flag0] "r" (flag0), [flag1] "r" (flag1)
+        : "cc", "memory", "r10", "r11", "rcx", "r12", "r13", "r14", "r15", "rbx", "rdx"
+    );
+}
+
+template<> inline void ofork_key<uint32_t>(unsigned char *dest, unsigned char *source,
+                                            uint8_t flag0, uint8_t flag1) {
+  ofork_buffer<OFORK_4>(dest, source, 4, flag0, flag1);
+}
+template<> inline void ofork_key<uint64_t>(unsigned char *dest, unsigned char *source,
+                                            uint8_t flag0, uint8_t flag1) {
+  ofork_buffer<OFORK_8>(dest, source, 8, flag0, flag1);
+}
+template<> inline void ofork_key<__uint128_t>(unsigned char *dest, unsigned char *source,
+                                               uint8_t flag0, uint8_t flag1) {
+  ofork_buffer<OFORK_16X>(dest, source, 16, flag0, flag1);
+}
+// ========================= OFork END =========================
+
 #endif

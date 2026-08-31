@@ -1221,7 +1221,7 @@ ControlReadResult ControlReadParallelWorkspace(unsigned char *D,
     if (copy_count > 0)
     {
       std::memcpy(S, D, copy_count * block_size);
-      RecursiveShuffle_M2(S, copy_count, block_size);
+      // RecursiveShuffle_M2(S, copy_count, block_size);
     }
     result.written_blocks = copy_count;
     return result;

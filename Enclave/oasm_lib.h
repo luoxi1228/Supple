@@ -39,6 +39,27 @@
 
   template<OSwap_Style oswap_style> inline void omove_buffer(unsigned char *dest, unsigned char *source, uint32_t buffersize, uint8_t flag); //将source缓冲区的内容移动到dest缓冲区，基于flag标志
 
+  // ======================== OFork BEGIN ========================
+  // Given the original values x=*dest and y=*source:
+  //   *dest   = flag0 ? y : x
+  //   *source = flag1 ? y : x
+  //
+  // Control mapping:
+  //   00 -> (x, x)
+  //   01 -> (x, y)
+  //   10 -> (y, x)
+  //   11 -> (y, y)
+  enum OFork_Style { OFORK_4, OFORK_8, OFORK_12, OFORK_16X, OFORK_8_16X };
+
+  template<OFork_Style ofork_style>
+  inline void ofork_buffer(unsigned char *dest, unsigned char *source,
+                           uint32_t buffersize, uint8_t flag0, uint8_t flag1);
+
+  template<typename KeyType>
+  inline void ofork_key(unsigned char *dest, unsigned char *source,
+                        uint8_t flag0, uint8_t flag1);
+  // ========================= OFork END =========================
+
   inline uint8_t ogt_set_flag(uint64_t key1, uint64_t key2) //返回1如果key1 > key2，否则返回0，以完全不可知的方式。
   {
     uint8_t flag;

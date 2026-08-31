@@ -62,6 +62,120 @@ double MeasureOSWAPBuffer(unsigned char *buf, size_t N, size_t block_size){
   return ptime;
 }
 
+// ============================================================================
+// OSwap / OFork primitive benchmark
+// ============================================================================
+
+namespace {
+
+enum PrimitiveBenchmarkKind : uint8_t {
+  BENCHMARK_OSWAP = 0,
+  BENCHMARK_OFORK = 1
+};
+
+template<OSwap_Style style>
+double measure_oswap_pairs(unsigned char *buf,
+                           size_t pairs,
+                           size_t block_size,
+                           uint8_t flag) {
+  long start_time;
+  long stop_time;
+
+  ocall_clock(&start_time);
+  for (size_t i = 0; i < pairs; i++) {
+    unsigned char *dest = buf + (2 * i * block_size);
+    unsigned char *source = dest + block_size;
+    oswap_buffer<style>(dest, source, static_cast<uint32_t>(block_size), flag);
+  }
+  ocall_clock(&stop_time);
+
+  return static_cast<double>(stop_time - start_time);
+}
+
+template<OFork_Style style>
+double measure_ofork_pairs(unsigned char *buf,
+                           size_t pairs,
+                           size_t block_size,
+                           uint8_t flag0,
+                           uint8_t flag1) {
+  long start_time;
+  long stop_time;
+
+  ocall_clock(&start_time);
+  for (size_t i = 0; i < pairs; i++) {
+    unsigned char *dest = buf + (2 * i * block_size);
+    unsigned char *source = dest + block_size;
+    ofork_buffer<style>(dest, source, static_cast<uint32_t>(block_size),
+                        flag0, flag1);
+  }
+  ocall_clock(&stop_time);
+
+  return static_cast<double>(stop_time - start_time);
+}
+
+}  // namespace
+
+double MeasureObliviousPrimitive(unsigned char *buf,
+                                 size_t pairs,
+                                 size_t block_size,
+                                 uint8_t primitive,
+                                 uint8_t flag0,
+                                 uint8_t flag1) {
+  if (buf == NULL || pairs == 0) {
+    return -1.0;
+  }
+
+  if (primitive == BENCHMARK_OSWAP) {
+    if (block_size == 4) {
+      return measure_oswap_pairs<OSWAP_4>(
+          buf, pairs, block_size, flag0);
+    }
+    if (block_size == 8) {
+      return measure_oswap_pairs<OSWAP_8>(
+          buf, pairs, block_size, flag0);
+    }
+    if (block_size == 12) {
+      return measure_oswap_pairs<OSWAP_12>(
+          buf, pairs, block_size, flag0);
+    }
+    if (block_size >= 16 && block_size % 16 == 0) {
+      return measure_oswap_pairs<OSWAP_16X>(
+          buf, pairs, block_size, flag0);
+    }
+    if (block_size >= 24 && block_size % 16 == 8) {
+      return measure_oswap_pairs<OSWAP_8_16X>(
+          buf, pairs, block_size, flag0);
+    }
+    return -1.0;
+  }
+
+  if (primitive == BENCHMARK_OFORK) {
+    if (block_size == 4) {
+      return measure_ofork_pairs<OFORK_4>(
+          buf, pairs, block_size, flag0, flag1);
+    }
+    if (block_size == 8) {
+      return measure_ofork_pairs<OFORK_8>(
+          buf, pairs, block_size, flag0, flag1);
+    }
+    if (block_size == 12) {
+      return measure_ofork_pairs<OFORK_12>(
+          buf, pairs, block_size, flag0, flag1);
+    }
+    if (block_size >= 16 && block_size % 16 == 0) {
+      return measure_ofork_pairs<OFORK_16X>(
+          buf, pairs, block_size, flag0, flag1);
+    }
+    if (block_size >= 24 && block_size % 16 == 8) {
+      return measure_ofork_pairs<OFORK_8_16X>(
+          buf, pairs, block_size, flag0, flag1);
+    }
+    return -1.0;
+  }
+
+  return -1.0;
+}
+
 
 /*
   Weak test for non-order preserving TightCompaction
@@ -194,6 +308,5 @@ int8_t InitializeKeys(unsigned char *bin_x,  unsigned char* bin_y,
   return 1;
 }
 */
-
 
 

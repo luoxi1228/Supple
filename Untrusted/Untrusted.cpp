@@ -513,3 +513,21 @@ double MeasureOSWAPBuffer(unsigned char *buf, size_t N, size_t block_size) {
   MeasureOSWAPBuffer(global_eid, &ptime, buf, N, block_size);
   return ptime;
 }
+
+double MeasureObliviousPrimitive(unsigned char *buf,
+                                 size_t pairs,
+                                 size_t block_size,
+                                 uint8_t primitive,
+                                 uint8_t flag0,
+                                 uint8_t flag1) {
+  double elapsed_us = -1.0;
+  sgx_status_t status = ::MeasureObliviousPrimitive(
+      global_eid, &elapsed_us, buf, pairs, block_size,
+      primitive, flag0, flag1);
+
+  if (status != SGX_SUCCESS) {
+    print_error_message(status);
+    return -1.0;
+  }
+  return elapsed_us;
+}

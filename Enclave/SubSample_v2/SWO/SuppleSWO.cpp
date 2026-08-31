@@ -377,7 +377,7 @@ ControlReadResult CONTROLREAD_WORKSPACE(unsigned char *D,
     if (copy_count > 0)
     {
       std::memcpy(S, D, copy_count * block_size);
-      RecursiveShuffle_M2(S, copy_count, block_size);
+      // RecursiveShuffle_M2(S, copy_count, block_size); //任务调整
     }
     result.written_blocks = copy_count;
     return result;
