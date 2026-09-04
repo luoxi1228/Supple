@@ -1,0 +1,401 @@
+\begin{algorithm}[t]
+\caption{$\FMSControlBits(T)$}
+\label{alg:fms-control-bits}
+\begin{algorithmic}[1]
+\Require Secret routing-tag array $T$ of public length $n=2^h$
+\Ensure Control-word array $C$ containing one two-bit word for every
+$\mathsf{OFork}$ gate
+\State $n \gets |T|$
+\State $\ell_C \gets \FMSControlNum(n)$
+\State Create array $C$ of length $\ell_C$
+\State $\widehat{T} \gets \TagNormalize(T)$
+\State $p \gets \FMSControlWrite(\widehat{T},C,0)$
+\State \textbf{assert} $p=\ell_C$
+\State \Return $C$
+\end{algorithmic}
+\end{algorithm}
+
+
+\begin{algorithm}[t]
+\caption{$\FMSControlNum(n)$}
+\label{alg:fms-control-num}
+\begin{algorithmic}[1]
+\Require Public node size $n=2^h$, where $n\geq 2$
+\Ensure Number $\ell$ of two-bit $\mathsf{OFork}$ control words
+\If{$n=2$}
+    \State \Return $1$
+\EndIf
+\State $\ell_g \gets n/2$
+\State $\ell_{\mathsf{sub}} \gets \FMSControlNum(\ell_g)$
+\State \Return $\ell_g+2\ell_{\mathsf{sub}}$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]
+\caption{$\FMSControlWrite(T,C,p)$}
+\label{alg:fms-control-write}
+\begin{algorithmic}[1]
+\Require Normalized secret routing-tag array $T$ of public length
+$n=2^h$, where
+$\sum_i T[i][0]=\sum_i T[i][1]=n/2$,
+global control array $C$, and public writing position $p$
+\Ensure Next free position $p$ in $C$
+\State $n \gets |T|$
+\If{$n=2$}
+    \State $C[p] \gets \OForkControl(T[0],T[1],\TLeft,\TRight)$
+    \State \Return $p+1$
+\EndIf
+
+\State $\ell_g \gets n/2$
+\State $(C_{\mathsf{cur}},T_{\mathsf{top}},T_{\mathsf{bot}})
+       \gets \FMSBalance(T)$
+\State $C[p:p+\ell_g) \gets C_{\mathsf{cur}}$
+\State $p \gets p+\ell_g$
+\State $p \gets \FMSControlWrite(T_{\mathsf{top}},C,p)$
+\State $p \gets \FMSControlWrite(T_{\mathsf{bot}},C,p)$
+\State \Return $p$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]
+\caption{$\OForkControl(x,y,t_{\mathsf{top}},t_{\mathsf{bot}})$}
+\label{alg:fms-choose-ofork-control}
+\begin{algorithmic}[1]
+\Require Input tags $x,y$ and desired secret output tags $t_{\mathsf{top}},t_{\mathsf{bot}}$
+\Ensure A two-bit $\OFork$ control word $c$
+
+\State $m_{\mathsf{straight}}\gets
+       \LDBracket t_{\mathsf{top}}=x \RDBracket
+       \land
+       \LDBracket t_{\mathsf{bot}}=y \RDBracket$
+\State $m_{\mathsf{cross}}\gets
+       \LDBracket t_{\mathsf{top}}=y \RDBracket
+       \land
+       \LDBracket t_{\mathsf{bot}}=x \RDBracket$
+
+\State $f_x\gets
+       \LDBracket x=\TBoth \RDBracket
+       \land
+       \LDBracket y=\TZero \RDBracket$
+\State $f_y\gets
+       \LDBracket x=\TZero \RDBracket
+       \land
+       \LDBracket y=\TBoth \RDBracket$
+\State $f\gets f_x\lor f_y$
+
+\State $m_{\mathsf{LR}}\gets
+       \LDBracket t_{\mathsf{top}}=\TLeft \RDBracket
+       \land
+       \LDBracket t_{\mathsf{bot}}=\TRight \RDBracket$
+\State $m_{\mathsf{RL}}\gets
+       \LDBracket t_{\mathsf{top}}=\TRight \RDBracket
+       \land
+       \LDBracket t_{\mathsf{bot}}=\TLeft \RDBracket$
+\State $m_{\mathsf{fork}}\gets
+       f\land(m_{\mathsf{LR}}\lor m_{\mathsf{RL}})$
+
+\State $c_{\mathsf{fork}}\gets(f_y,f_y)$
+       \Comment{$(0,0)$ copies $x$; $(1,1)$ copies $y$}
+\State $u_{\mathsf{cross}}\gets
+       m_{\mathsf{cross}}\land\neg m_{\mathsf{straight}}$
+\State $u_{\mathsf{fork}}\gets
+       m_{\mathsf{fork}}\land\neg m_{\mathsf{straight}}
+       \land\neg m_{\mathsf{cross}}$
+
+\State $c\gets(0,1)$
+\State $c\gets\OSelect(c,(1,0),u_{\mathsf{cross}})$
+\State $c\gets\OSelect(c,c_{\mathsf{fork}},u_{\mathsf{fork}})$
+\State \Return $c$
+\end{algorithmic}
+\end{algorithm}
+
+
+\begin{algorithm}[t]
+\caption{$\TagNormalize(T)$}
+\label{alg:fms-normalize-tags}
+\begin{algorithmic}[1]
+\Require Secret routing-tag array $T$ of public length $n=2^h$,
+where $\sum_{i=0}^{n-1} T[i][0]\leq n/2$ and $\sum_{i=0}^{n-1} T[i][1]\leq n/2 $
+\Ensure A normalized routing-tag array $\widehat{T}$ satisfying
+$\sum_{i=0}^{n-1}\widehat{T}[i][0] = \sum_{i=0}^{n-1}\widehat{T}[i][1] = n/2 $
+and every nonzero input tag remains unchanged
+
+\State $n\gets |T|$
+\State $w_L\gets 0$, $w_R\gets 0$
+       \Comment{Current left and right responsibilities}
+
+\For{$i\gets 0\dots n-1$}
+    \State $w_L\gets w_L+T[i][0]$
+    \State $w_R\gets w_R+T[i][1]$
+\EndFor
+
+\State $a_L\gets n/2-w_L$
+       \Comment{Number of $\TZero$ tags assigned to the left}
+\State $a_R\gets n/2-w_R$
+       \Comment{Number of $\TZero$ tags assigned to the right}
+
+\State Create an array $\widehat{T}$ of length $n$
+\State $r_0\gets 0$
+       \Comment{Number of preceding $\TZero$ tags}
+
+\For{$i\gets 0\dots n-1$}
+    \State $z\gets\LDBracket T[i]=\TZero\RDBracket$
+
+    \State $u_L\gets
+           z\land
+           \LDBracket r_0<a_L\RDBracket$
+
+    \State $u_R\gets
+           z\land
+           \LDBracket a_L\leq r_0\RDBracket
+           \land
+           \LDBracket r_0<a_L+a_R\RDBracket$
+
+    \State $\widehat{T}[i]\gets T[i]$
+    \State $\widehat{T}[i]\gets
+           \OSelect(\widehat{T}[i],\TLeft,u_L)$
+    \State $\widehat{T}[i]\gets
+           \OSelect(\widehat{T}[i],\TRight,u_R)$
+
+    \State $r_0\gets r_0+z$
+\EndFor
+
+\State \Return $\widehat{T}$
+\end{algorithmic}
+\end{algorithm}
+
+
+\begin{algorithm}[t]
+\caption{$\TagPairMask(x,y)$}
+\label{alg:fms-type-masks}
+\begin{algorithmic}[1]
+\Require Two secret routing tags $x$ and $y$
+\Ensure A one-hot array $M\in\{0,1\}^{10}$ for the unordered tag-pair types
+$\{\TZero,\TZero\}$, $\{\TZero,\TLeft\}$, $\{\TZero,\TRight\}$, $\{\TZero,\TBoth\}$,
+$\{\TLeft,\TLeft\}$, $\{\TLeft,\TRight\}$, $\{\TLeft,\TBoth\}$, $\{\TRight,\TRight\}$,
+$\{\TRight,\TBoth\}$, and $\{\TBoth,\TBoth\}$, in this order
+
+\State $M[0]\gets
+       \LDBracket x=\TZero \RDBracket
+       \land
+       \LDBracket y=\TZero \RDBracket$
+
+\State $M[1]\gets
+       \bigl(
+       \LDBracket x=\TZero \RDBracket
+       \land
+       \LDBracket y=\TLeft \RDBracket
+       \bigr)
+       \lor
+       \bigl(
+       \LDBracket x=\TLeft \RDBracket
+       \land
+       \LDBracket y=\TZero \RDBracket
+       \bigr)$
+
+\State $M[2]\gets
+       \bigl(
+       \LDBracket x=\TZero \RDBracket
+       \land
+       \LDBracket y=\TRight \RDBracket
+       \bigr)
+       \lor
+       \bigl(
+       \LDBracket x=\TRight \RDBracket
+       \land
+       \LDBracket y=\TZero \RDBracket
+       \bigr)$
+
+\State $M[3]\gets
+       \bigl(
+       \LDBracket x=\TZero \RDBracket
+       \land
+       \LDBracket y=\TBoth \RDBracket
+       \bigr)
+       \lor
+       \bigl(
+       \LDBracket x=\TBoth \RDBracket
+       \land
+       \LDBracket y=\TZero \RDBracket
+       \bigr)$
+
+\State $M[4]\gets
+       \LDBracket x=\TLeft \RDBracket
+       \land
+       \LDBracket y=\TLeft \RDBracket$
+
+\State $M[5]\gets
+       \bigl(
+       \LDBracket x=\TLeft \RDBracket
+       \land
+       \LDBracket y=\TRight \RDBracket
+       \bigr)
+       \lor
+       \bigl(
+       \LDBracket x=\TRight \RDBracket
+       \land
+       \LDBracket y=\TLeft \RDBracket
+       \bigr)$
+
+\State $M[6]\gets
+       \bigl(
+       \LDBracket x=\TLeft \RDBracket
+       \land
+       \LDBracket y=\TBoth \RDBracket
+       \bigr)
+       \lor
+       \bigl(
+       \LDBracket x=\TBoth \RDBracket
+       \land
+       \LDBracket y=\TLeft \RDBracket
+       \bigr)$
+
+\State $M[7]\gets
+       \LDBracket x=\TRight \RDBracket
+       \land
+       \LDBracket y=\TRight \RDBracket$
+
+\State $M[8]\gets
+       \bigl(
+       \LDBracket x=\TRight \RDBracket
+       \land
+       \LDBracket y=\TBoth \RDBracket
+       \bigr)
+       \lor
+       \bigl(
+       \LDBracket x=\TBoth \RDBracket
+       \land
+       \LDBracket y=\TRight \RDBracket
+       \bigr)$
+
+\State $M[9]\gets
+       \LDBracket x=\TBoth \RDBracket
+       \land
+       \LDBracket y=\TBoth \RDBracket$
+
+\State \Return $M$
+\end{algorithmic}
+\end{algorithm}
+
+
+\begin{algorithm}[t]
+\caption{$\FMSBalance(T)$}
+\label{alg:fms-balance-layer}
+\begin{algorithmic}[1]
+\Require Secret routing-tag array $T$ of public length $n\geq 4$,
+where $\sum_i T[i][0]=\sum_i T[i][1]=n/2$
+\Ensure Current-layer control array $C_{\mathsf{cur}}$ and balanced child-tag arrays
+$T_{\mathsf{top}}$ and $T_{\mathsf{bot}}$
+
+\State $n \gets |T|$
+\State $\ell_g \gets n/2$
+
+\State Create array $H$ of length $10$, initialized to $0$
+       \Comment{Tag-pair type counts}
+
+\For{$i \gets 0\dots \ell_g-1$}
+    \State $x \gets T[2i]$, $y \gets T[2i+1]$
+    \State $M \gets \TagPairMask(x,y)$
+    \For{$j \gets 0\dots 9$}
+        \State $H[j] \gets H[j]+M[j]$
+    \EndFor
+\EndFor
+
+\State $d \gets H[5]$
+       \Comment{Number of $\{\TLeft,\TRight\}$ pairs}
+
+\State $v_L \gets H[1]+H[3]+H[8]$
+\State $v_R \gets H[2]+H[3]+H[6]$
+\State $q_D \gets \left\lfloor d/2\right\rfloor$
+       \Comment{Number assigned $\TLeft$ at the top}
+\State $q_L \gets \left\lceil  \frac{v_L}{2} \right\rceil$,
+       $q_R \gets \left\lfloor \frac{v_R}{2} \right\rfloor$
+
+\State $r_D \gets 0$, $r_L \gets 0$,
+       $r_R \gets 0$
+\State Create length-$\ell_g$ arrays $C_{\mathsf{cur}}$, $T_{\mathsf{top}}$, and
+       $T_{\mathsf{bot}}$
+
+\For{$i \gets 0\dots \ell_g-1$}
+    \State $x \gets T[2i]$, $y \gets T[2i+1]$
+    \State $M \gets \TagPairMask(x,y)$
+
+    \State $\mathsf{is}_D \gets
+           M[5]\land\LDBracket r_D<q_D\RDBracket$
+    \State $\mathsf{is}_L \gets
+           (M[1]\lor M[3]\lor M[8])
+           \land\LDBracket r_L<q_L\RDBracket$
+    \State $\mathsf{is}_R \gets
+           (M[2]\lor M[3]\lor M[6])
+           \land\LDBracket r_R<q_R\RDBracket$
+
+    \State $\mathsf{fixed}_L \gets M[4]\lor M[6]\lor M[9]$
+    \State $\mathsf{fixed}_R \gets M[7]\lor M[8]\lor M[9]$
+
+    \State $t_L \gets
+           \mathsf{fixed}_L\lor\mathsf{is}_D\lor\mathsf{is}_L$
+    \State $t_R \gets
+           \mathsf{fixed}_R
+           \lor(M[5]\land\neg\mathsf{is}_D)
+           \lor\mathsf{is}_R$
+
+    \State $b_L \gets x[0]+y[0]-t_L$
+    \State $b_R \gets x[1]+y[1]-t_R$
+
+    \State $t_{\mathsf{top}} \gets (t_L,t_R)$
+    \State $t_{\mathsf{bot}} \gets (b_L,b_R)$
+    \State $C_{\mathsf{cur}}[i] \gets
+           \OForkControl(x,y,t_{\mathsf{top}},t_{\mathsf{bot}})$
+    \State $T_{\mathsf{top}}[i] \gets t_{\mathsf{top}}$
+    \State $T_{\mathsf{bot}}[i] \gets t_{\mathsf{bot}}$
+
+    \State $r_D \gets r_D+M[5]$
+    \State $r_L \gets r_L+(M[1]\lor M[3]\lor M[8])$
+    \State $r_R \gets r_R+(M[2]\lor M[3]\lor M[6])$
+\EndFor
+
+\State \Return $(C_{\mathsf{cur}},T_{\mathsf{top}},T_{\mathsf{bot}})$
+\end{algorithmic}
+\end{algorithm}
+
+
+\begin{algorithm}[t]
+\caption{$\FMSApply(D,C,p)$}
+\label{alg:fms-apply}
+\begin{algorithmic}[1]
+\Require Current data array $D$ of public length $n=2^h$,
+global control-word array $C$, and public reading position $p$
+\Ensure Left and right output arrays $D_L,D_R$ of length $n/2$,
+and next unread position $p$ in $C$
+
+\State $n\gets |D|$
+
+\If{$n=2$}
+    \State $(d_L,d_R)\gets
+           \OFork(D[0],D[1],C[p])$
+    \State \Return $([d_L],[d_R],p+1)$
+\EndIf
+
+\State $\ell_g\gets n/2$
+\State Create length-$\ell_g$ arrays
+       $D_{\mathsf{top}}$ and $D_{\mathsf{bot}}$
+
+\For{$i\gets 0\dots \ell_g-1$}
+    \State $(D_{\mathsf{top}}[i],D_{\mathsf{bot}}[i])
+           \gets
+           \OFork(D[2i],D[2i+1],C[p+i])$
+\EndFor
+
+\State $p\gets p+\ell_g$
+
+\State $(A_L,A_R,p)\gets
+       \FMSApply(D_{\mathsf{top}},C,p)$
+\State $(B_L,B_R,p)\gets
+       \FMSApply(D_{\mathsf{bot}},C,p)$
+
+\State $D_L\gets A_L\parallel B_L$
+\State $D_R\gets A_R\parallel B_R$
+
+\State \Return $(D_L,D_R,p)$
+\end{algorithmic}
+\end{algorithm}
