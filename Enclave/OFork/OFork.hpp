@@ -74,13 +74,17 @@ bool FMSApply(unsigned char *data,
               size_t control_count);
 
 // EDL entry points used by Application/OForkApplication.cpp. FMSPrepare is the
-// offline phase. The two measurement calls time one online invocation only and
-// return microseconds; negative values indicate invalid state or arguments.
+// offline phase and reports the FMSControlBits generation time in microseconds.
+// The two online measurement calls time one invocation only and return
+// microseconds; negative values indicate invalid state or arguments.
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-int FMSPrepare(uint8_t *routing_tags, size_t n, size_t *control_words);
+int FMSPrepare(uint8_t *routing_tags,
+               size_t n,
+               size_t *control_words,
+               double *control_bits_us);
 
 double FMSApplyOnline(unsigned char *buffer,
                       size_t n,

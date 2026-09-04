@@ -3,7 +3,8 @@ enclave {
         public int FMSPrepare(
             [in, size=n] uint8_t *routing_tags,
             size_t n,
-            [out] size_t *control_words);
+            [out] size_t *control_words,
+            [out] double *control_bits_us);
 
         public double FMSApplyOnline(
             [user_check] unsigned char *buffer,

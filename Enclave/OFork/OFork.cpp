@@ -374,16 +374,22 @@ bool FMSApply(unsigned char *data,
 
 extern "C" int FMSPrepare(uint8_t *routing_tags,
                           size_t n,
-                          size_t *control_words)
+                          size_t *control_words,
+                          double *control_bits_us)
 {
   if (routing_tags == NULL || control_words == NULL ||
+      control_bits_us == NULL ||
       !FMSIsPowerOfTwo(n))
   {
     return -1;
   }
 
+  *control_bits_us = -1.0;
   std::vector<uint8_t> controls;
   std::vector<uint8_t> normalized_tags;
+  long start_time = 0;
+  long stop_time = 0;
+  ocall_clock(&start_time);
   if (!FMSControlBits(routing_tags,
                       n,
                       &controls,
@@ -391,6 +397,8 @@ extern "C" int FMSPrepare(uint8_t *routing_tags,
   {
     return -2;
   }
+  ocall_clock(&stop_time);
+  *control_bits_us = static_cast<double>(stop_time - start_time);
 
   if (!ofork_internal::StoreContext(&controls, &normalized_tags))
   {

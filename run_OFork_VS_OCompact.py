@@ -16,6 +16,7 @@ BINARY_FIELDS = [
     "fork_ratio",
     "repeats",
     "control_words",
+    "fms_control_bits_us",
     "fms_gates",
     "two_compact_gates",
     "fms_apply_us",
@@ -35,6 +36,7 @@ CSV_FIELDS = [
     "warmups",
     "seed",
     "control_words",
+    "fms_control_bits_us",
     "fms_gates",
     "two_compact_gates",
     "fms_apply_us",
@@ -243,6 +245,11 @@ def main() -> int:
                 row["seed"] = case_seed
                 rows.append(row)
 
+                print(
+                    "  offline generation: "
+                    f"FMSControlBits="
+                    f"{float(result['fms_control_bits_us']):.3f} us"
+                )
                 print(
                     "  online median: "
                     f"FMSApply={float(result['fms_apply_us']):.3f} us, "

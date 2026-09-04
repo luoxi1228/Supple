@@ -313,7 +313,11 @@ int main(int argc, char **argv)
   OLib_initialize();
 
   size_t control_words = 0;
-  const int prepare_result = FMSPrepare(tags.data(), n, &control_words);
+  double control_bits_us = -1.0;
+  const int prepare_result = FMSPrepare(tags.data(),
+                                        n,
+                                        &control_words,
+                                        &control_bits_us);
   if (prepare_result != 0)
   {
     std::fprintf(stderr, "FMSPrepare failed with code %d.\n", prepare_result);
@@ -392,13 +396,14 @@ int main(int argc, char **argv)
           : 0;
 
   std::printf(
-      "RESULT,%zu,%zu,%.9f,%zu,%zu,%zu,%zu,"
+      "RESULT,%zu,%zu,%.9f,%zu,%zu,%.9f,%zu,%zu,"
       "%.9f,%.9f,%.9f,%.9f,%.9f,1\n",
       n,
       block_size,
       actual_fork_ratio,
       repeats,
       control_words,
+      control_bits_us,
       fms_gates,
       two_compact_gates,
       fms_us,

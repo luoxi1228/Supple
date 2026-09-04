@@ -535,8 +535,10 @@ double MeasureObliviousPrimitive(unsigned char *buf,
 
 int FMSPrepare(const uint8_t *routing_tags,
                size_t n,
-               size_t *control_words) {
-  if (routing_tags == NULL || control_words == NULL) {
+               size_t *control_words,
+               double *control_bits_us) {
+  if (routing_tags == NULL || control_words == NULL ||
+      control_bits_us == NULL) {
     return -1;
   }
 
@@ -546,7 +548,8 @@ int FMSPrepare(const uint8_t *routing_tags,
       &result,
       const_cast<uint8_t *>(routing_tags),
       n,
-      control_words);
+      control_words,
+      control_bits_us);
   if (status != SGX_SUCCESS) {
     print_error_message(status);
     return -1;

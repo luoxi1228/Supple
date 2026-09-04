@@ -8,7 +8,8 @@
 // Returns 0 on success and a negative value on failure.
 int FMSPrepare(const uint8_t *routing_tags,
                size_t n,
-               size_t *control_words);
+               size_t *control_words,
+               double *control_bits_us);
 
 // Enclave-side online times in microseconds. Input restoration and ECALL
 // transition costs are deliberately excluded from these values.
