@@ -128,6 +128,14 @@ void MarkHalf(uint64_t N, bool *selected_list) {
       FOAV_SAFE_CNTXT(RS_M1_branching_on_block_size_for_OSwap_Style_templates, block_size)
       RecursiveShuffle_M1_inner<OSWAP_12>(buf, N, block_size, selected_list);
       FOAV_SAFE_CNTXT(RS_M1_branching_on_block_size_for_OSwap_Style_templates, block_size)
+    } else if(block_size==16){
+      FOAV_SAFE_CNTXT(RS_M1_branching_on_block_size_for_OSwap_Style_templates, block_size)
+      RecursiveShuffle_M1_inner<OSWAP_16>(buf, N, block_size, selected_list);
+      FOAV_SAFE_CNTXT(RS_M1_branching_on_block_size_for_OSwap_Style_templates, block_size)
+    } else if(block_size==24){
+      FOAV_SAFE_CNTXT(RS_M1_branching_on_block_size_for_OSwap_Style_templates, block_size)
+      RecursiveShuffle_M1_inner<OSWAP_24>(buf, N, block_size, selected_list);
+      FOAV_SAFE_CNTXT(RS_M1_branching_on_block_size_for_OSwap_Style_templates, block_size)
     } else if(block_size%16==0) {
       FOAV_SAFE_CNTXT(RS_M1_branching_on_block_size_for_OSwap_Style_templates, block_size)
       RecursiveShuffle_M1_inner<OSWAP_16X>(buf, N, block_size, selected_list);
@@ -165,6 +173,10 @@ void RecursiveShuffle_M2_parallel(unsigned char *buf, uint64_t N, size_t block_s
       RecursiveShuffle_M2_inner<OSWAP_8>(buf, N, block_size, selected_list);
     } else if(block_size==12){
       RecursiveShuffle_M2_inner<OSWAP_12>(buf, N, block_size, selected_list);
+    } else if(block_size==16){
+      RecursiveShuffle_M2_inner<OSWAP_16>(buf, N, block_size, selected_list);
+    } else if(block_size==24){
+      RecursiveShuffle_M2_inner<OSWAP_24>(buf, N, block_size, selected_list);
     } else if(block_size%16==0) {
       RecursiveShuffle_M2_inner<OSWAP_16X>(buf, N, block_size, selected_list);
     } else {
@@ -183,6 +195,10 @@ void RecursiveShuffle_M2_parallel(unsigned char *buf, uint64_t N, size_t block_s
   } else if(block_size==12){
     // 【新增】12 字节专属分支
     RecursiveShuffle_M2_inner_parallel<OSWAP_12>(buf, N, block_size, selected_list, nthreads);
+  } else if(block_size==16){
+    RecursiveShuffle_M2_inner_parallel<OSWAP_16>(buf, N, block_size, selected_list, nthreads);
+  } else if(block_size==24){
+    RecursiveShuffle_M2_inner_parallel<OSWAP_24>(buf, N, block_size, selected_list, nthreads);
   } else if(block_size%16==0) {
     RecursiveShuffle_M2_inner_parallel<OSWAP_16X>(buf, N, block_size, selected_list, nthreads);
   } else {
@@ -240,6 +256,10 @@ double RecursiveShuffle_M2_opt(unsigned char *buf, uint64_t N, size_t block_size
   } else if(block_size==12){
     // 【新增】12 字节专属分支
     RecursiveShuffle_M2_inner<OSWAP_12>(buf, N, block_size, selected_list);
+  } else if(block_size==16){
+    RecursiveShuffle_M2_inner<OSWAP_16>(buf, N, block_size, selected_list);
+  } else if(block_size==24){
+    RecursiveShuffle_M2_inner<OSWAP_24>(buf, N, block_size, selected_list);
   } else if(block_size%16==0) {
     RecursiveShuffle_M2_inner<OSWAP_16X>(buf, N, block_size, selected_list);
   } else {

@@ -95,6 +95,75 @@ template<> inline void oswap_buffer<OSWAP_12>(unsigned char *dest, unsigned char
     #endif
 }
 
+template<> inline void oswap_buffer<OSWAP_16>(unsigned char *dest, unsigned char *source, uint32_t buffersize, uint8_t flag)
+{
+    #ifdef COUNT_OSWAPS
+      OSWAP_COUNTER++;
+    #endif
+
+    (void)buffersize;
+    __asm__ volatile (
+        "# inline oswap_buffer<OSWAP_16>\n"
+        "movq (%[dest]), %%r14\n"
+        "movq 8(%[dest]), %%rbx\n"
+        "movq (%[source]), %%r15\n"
+        "movq 8(%[source]), %%r13\n"
+        "movq %%r14, %%r12\n"
+        "movq %%rbx, %%rdx\n"
+        "test %[flag], %[flag]\n"
+        "cmovnz %%r15, %%r14\n"
+        "cmovnz %%r13, %%rbx\n"
+        "cmovnz %%r12, %%r15\n"
+        "cmovnz %%rdx, %%r13\n"
+        "movq %%r14, (%[dest])\n"
+        "movq %%rbx, 8(%[dest])\n"
+        "movq %%r15, (%[source])\n"
+        "movq %%r13, 8(%[source])\n"
+        :
+        : [dest] "r" (dest), [source] "r" (source), [flag] "r" (flag)
+        : "cc", "memory", "r12", "r13", "r14", "r15", "rbx", "rdx"
+    );
+}
+
+template<> inline void oswap_buffer<OSWAP_24>(unsigned char *dest, unsigned char *source, uint32_t buffersize, uint8_t flag)
+{
+    #ifdef COUNT_OSWAPS
+      OSWAP_COUNTER++;
+    #endif
+
+    (void)buffersize;
+    __asm__ volatile (
+        "# inline oswap_buffer<OSWAP_24>\n"
+        // Swap the first two qwords.
+        "movq (%[dest]), %%r14\n"
+        "movq 8(%[dest]), %%rbx\n"
+        "movq (%[source]), %%r15\n"
+        "movq 8(%[source]), %%r13\n"
+        "movq %%r14, %%r12\n"
+        "movq %%rbx, %%rdx\n"
+        "test %[flag], %[flag]\n"
+        "cmovnz %%r15, %%r14\n"
+        "cmovnz %%r13, %%rbx\n"
+        "cmovnz %%r12, %%r15\n"
+        "cmovnz %%rdx, %%r13\n"
+        "movq %%r14, (%[dest])\n"
+        "movq %%rbx, 8(%[dest])\n"
+        "movq %%r15, (%[source])\n"
+        "movq %%r13, 8(%[source])\n"
+        // Reuse the same registers for the final qword.
+        "movq 16(%[dest]), %%r14\n"
+        "movq 16(%[source]), %%r15\n"
+        "movq %%r14, %%r12\n"
+        "cmovnz %%r15, %%r14\n"
+        "cmovnz %%r12, %%r15\n"
+        "movq %%r14, 16(%[dest])\n"
+        "movq %%r15, 16(%[source])\n"
+        :
+        : [dest] "r" (dest), [source] "r" (source), [flag] "r" (flag)
+        : "cc", "memory", "r12", "r13", "r14", "r15", "rbx", "rdx"
+    );
+}
+
 template<> inline void oswap_buffer<OSWAP_16X>(unsigned char *dest, unsigned char *source, uint32_t buffersize, uint8_t flag)
 {
     #ifdef COUNT_OSWAPS
@@ -227,7 +296,7 @@ template<> inline void oswap_key<uint64_t>(unsigned char *dest, unsigned char *s
 
 template<> inline void oswap_key<__uint128_t>(unsigned char *dest, unsigned char *source, uint8_t flag)
 {
-    oswap_buffer<OSWAP_16X>(dest, source, 16, flag);
+    oswap_buffer<OSWAP_16>(dest, source, 16, flag);
 }
 
 template<> inline void omove_buffer<OSWAP_8>(unsigned char *dest, unsigned char *source, uint32_t buffersize, uint8_t flag)
@@ -489,6 +558,83 @@ template<> inline void ofork_buffer<OFORK_12>(unsigned char *dest, unsigned char
     );
 }
 
+template<> inline void ofork_buffer<OFORK_16>(unsigned char *dest, unsigned char *source,
+                                               uint32_t buffersize, uint8_t flag0, uint8_t flag1)
+{
+    #ifdef COUNT_OSWAPS
+      OSWAP_COUNTER++;
+    #endif
+
+    (void)buffersize;
+    __asm__ volatile (
+        "# inline ofork_buffer<OFORK_16>\n"
+        "movq (%[dest]), %%r14\n"
+        "movq 8(%[dest]), %%rbx\n"
+        "movq (%[source]), %%r15\n"
+        "movq 8(%[source]), %%r13\n"
+        "movq %%r14, %%r12\n"
+        "movq %%rbx, %%rdx\n"
+        "test %[flag0], %[flag0]\n"
+        "cmovnz %%r15, %%r14\n"
+        "cmovnz %%r13, %%rbx\n"
+        "test %[flag1], %[flag1]\n"
+        "cmovnz %%r15, %%r12\n"
+        "cmovnz %%r13, %%rdx\n"
+        "movq %%r14, (%[dest])\n"
+        "movq %%rbx, 8(%[dest])\n"
+        "movq %%r12, (%[source])\n"
+        "movq %%rdx, 8(%[source])\n"
+        :
+        : [dest] "r" (dest), [source] "r" (source),
+          [flag0] "r" (flag0), [flag1] "r" (flag1)
+        : "cc", "memory", "r12", "r13", "r14", "r15", "rbx", "rdx"
+    );
+}
+
+template<> inline void ofork_buffer<OFORK_24>(unsigned char *dest, unsigned char *source,
+                                               uint32_t buffersize, uint8_t flag0, uint8_t flag1)
+{
+    #ifdef COUNT_OSWAPS
+      OSWAP_COUNTER++;
+    #endif
+
+    (void)buffersize;
+    __asm__ volatile (
+        "# inline ofork_buffer<OFORK_24>\n"
+        // Fork the first two qwords.
+        "movq (%[dest]), %%r14\n"
+        "movq 8(%[dest]), %%rbx\n"
+        "movq (%[source]), %%r15\n"
+        "movq 8(%[source]), %%r13\n"
+        "movq %%r14, %%r12\n"
+        "movq %%rbx, %%rdx\n"
+        "test %[flag0], %[flag0]\n"
+        "cmovnz %%r15, %%r14\n"
+        "cmovnz %%r13, %%rbx\n"
+        "test %[flag1], %[flag1]\n"
+        "cmovnz %%r15, %%r12\n"
+        "cmovnz %%r13, %%rdx\n"
+        "movq %%r14, (%[dest])\n"
+        "movq %%rbx, 8(%[dest])\n"
+        "movq %%r12, (%[source])\n"
+        "movq %%rdx, 8(%[source])\n"
+        // Reuse the same registers for the final qword.
+        "movq 16(%[dest]), %%r14\n"
+        "movq 16(%[source]), %%r15\n"
+        "movq %%r14, %%r12\n"
+        "test %[flag0], %[flag0]\n"
+        "cmovnz %%r15, %%r14\n"
+        "test %[flag1], %[flag1]\n"
+        "cmovnz %%r15, %%r12\n"
+        "movq %%r14, 16(%[dest])\n"
+        "movq %%r12, 16(%[source])\n"
+        :
+        : [dest] "r" (dest), [source] "r" (source),
+          [flag0] "r" (flag0), [flag1] "r" (flag1)
+        : "cc", "memory", "r12", "r13", "r14", "r15", "rbx", "rdx"
+    );
+}
+
 template<> inline void ofork_buffer<OFORK_16X>(unsigned char *dest, unsigned char *source,
                                                 uint32_t buffersize, uint8_t flag0, uint8_t flag1)
 {
@@ -594,7 +740,7 @@ template<> inline void ofork_key<uint64_t>(unsigned char *dest, unsigned char *s
 }
 template<> inline void ofork_key<__uint128_t>(unsigned char *dest, unsigned char *source,
                                                uint8_t flag0, uint8_t flag1) {
-  ofork_buffer<OFORK_16X>(dest, source, 16, flag0, flag1);
+  ofork_buffer<OFORK_16>(dest, source, 16, flag0, flag1);
 }
 // ========================= OFork END =========================
 

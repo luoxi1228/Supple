@@ -17,6 +17,12 @@ void TightCompact_v2(unsigned char *buffer, size_t N, size_t block_size, bool *s
   else if(block_size==12){
     TightCompact<OSWAP_12>(buffer, N, block_size, selected_list);
   }
+  else if(block_size==16){
+    TightCompact<OSWAP_16>(buffer, N, block_size, selected_list);
+  }
+  else if(block_size==24){
+    TightCompact<OSWAP_24>(buffer, N, block_size, selected_list);
+  }
   else if(block_size%16==0){
     //isCorrect16x(256);
     TightCompact<OSWAP_16X>(buffer, N, block_size, selected_list);
@@ -31,6 +37,12 @@ void TightCompact_v2(unsigned char *buffer, size_t N, size_t block_size, bool *s
 void TightCompact_v2_parallel(unsigned char *buffer, size_t N, size_t block_size, bool *selected_list, size_t nthreads) {
   if(block_size==8){
     TightCompact_parallel<OSWAP_8>(buffer, N, block_size, selected_list, nthreads);
+  }
+  else if(block_size==16){
+    TightCompact_parallel<OSWAP_16>(buffer, N, block_size, selected_list, nthreads);
+  }
+  else if(block_size==24){
+    TightCompact_parallel<OSWAP_24>(buffer, N, block_size, selected_list, nthreads);
   }
   else if(block_size%16==0){
     //isCorrect16x(256);
@@ -50,6 +62,10 @@ void OP_TightCompact_v2(unsigned char *buffer, size_t N, size_t block_size, bool
     OP_TightCompact<OSWAP_8>(buffer, N, block_size, selected_list);
   } else if(block_size==12){
     OP_TightCompact<OSWAP_12>(buffer, N, block_size, selected_list);
+  } else if(block_size==16){
+    OP_TightCompact<OSWAP_16>(buffer, N, block_size, selected_list);
+  } else if(block_size==24){
+    OP_TightCompact<OSWAP_24>(buffer, N, block_size, selected_list);
   } else if(block_size%16==0){
     OP_TightCompact<OSWAP_16X>(buffer, N, block_size, selected_list);
   } 

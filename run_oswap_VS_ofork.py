@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import List
 
 
+# python3 run_oswap_VS_ofork.py \
+#     --block-sizes 4,8,12,16,24,32,64,128,256,512,1024,4096 \
+#     --pairs 1000000 \
+#     --repeat 15 \
+#     --warmup 5
+
 CSV_FIELDS = [
     "block_size",
     "pairs",
@@ -61,8 +67,8 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="fixed number of pairs; 0 derives it from --target-bytes",
     )
-    parser.add_argument("--repeat", type=int, default=11)
-    parser.add_argument("--warmup", type=int, default=3)
+    parser.add_argument("--repeat", type=int, default=15)
+    parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument(
         "--output",
         default="RESULTS/oswap_ofork.csv",

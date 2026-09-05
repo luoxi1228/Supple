@@ -48,6 +48,10 @@ double MeasureOSWAPBuffer(unsigned char *buf, size_t N, size_t block_size){
   for(size_t i =0; i<N; i++) {
     if(block_size==8){
       oswap_buffer<OSWAP_8>(buffer, bfr_ptr, block_size, (bfr_ptr[0] & 1));
+    } else if(block_size==16){
+      oswap_buffer<OSWAP_16>(buffer, bfr_ptr, block_size, (bfr_ptr[0] & 1));
+    } else if(block_size==24){
+      oswap_buffer<OSWAP_24>(buffer, bfr_ptr, block_size, (bfr_ptr[0] & 1));
     } else if(block_size%16==0){
       oswap_buffer<OSWAP_16X>(buffer, bfr_ptr, block_size, (bfr_ptr[0] & 1));
     } else {
@@ -138,6 +142,14 @@ double MeasureObliviousPrimitive(unsigned char *buf,
       return measure_oswap_pairs<OSWAP_12>(
           buf, pairs, block_size, flag0);
     }
+    if (block_size == 16) {
+      return measure_oswap_pairs<OSWAP_16>(
+          buf, pairs, block_size, flag0);
+    }
+    if (block_size == 24) {
+      return measure_oswap_pairs<OSWAP_24>(
+          buf, pairs, block_size, flag0);
+    }
     if (block_size >= 16 && block_size % 16 == 0) {
       return measure_oswap_pairs<OSWAP_16X>(
           buf, pairs, block_size, flag0);
@@ -162,6 +174,14 @@ double MeasureObliviousPrimitive(unsigned char *buf,
       return measure_ofork_pairs<OFORK_12>(
           buf, pairs, block_size, flag0, flag1);
     }
+    if (block_size == 16) {
+      return measure_ofork_pairs<OFORK_16>(
+          buf, pairs, block_size, flag0, flag1);
+    }
+    if (block_size == 24) {
+      return measure_ofork_pairs<OFORK_24>(
+          buf, pairs, block_size, flag0, flag1);
+    }
     if (block_size >= 16 && block_size % 16 == 0) {
       return measure_ofork_pairs<OFORK_16X>(
           buf, pairs, block_size, flag0, flag1);
@@ -182,6 +202,7 @@ double MeasureObliviousPrimitive(unsigned char *buf,
   This test just checks that the first r blockse (where r = SUM(selected_list)) are real 
   blocks in compacted_buffer.
 */
+
 
 
 
@@ -308,5 +329,3 @@ int8_t InitializeKeys(unsigned char *bin_x,  unsigned char* bin_y,
   return 1;
 }
 */
-
-

@@ -33,7 +33,15 @@
 
 	extern "C" void ogt_comp_swap(uint64_t *key1, uint64_t *key2, unsigned char *buff1, unsigned char *buff2, uint32_t buffersize);
 
-  enum OSwap_Style { OSWAP_4, OSWAP_8, OSWAP_12, OSWAP_16X, OSWAP_8_16X };
+  enum OSwap_Style {
+    OSWAP_4,
+    OSWAP_8,
+    OSWAP_12,
+    OSWAP_16,
+    OSWAP_24,
+    OSWAP_16X,
+    OSWAP_8_16X
+  };
   template<OSwap_Style oswap_style> inline void oswap_buffer(unsigned char *dest, unsigned char *source, uint32_t buffersize, uint8_t flag); //交换dest与source缓冲区的内容，基于flag标志
   template<typename KeyType> inline void oswap_key(unsigned char *dest, unsigned char *source, uint8_t flag);  //交换dest与source缓冲区的内容，基于flag标志，KeyType指定密钥类型
 
@@ -49,7 +57,15 @@
   //   01 -> (x, y)
   //   10 -> (y, x)
   //   11 -> (y, y)
-  enum OFork_Style { OFORK_4, OFORK_8, OFORK_12, OFORK_16X, OFORK_8_16X };
+  enum OFork_Style {
+    OFORK_4,
+    OFORK_8,
+    OFORK_12,
+    OFORK_16,
+    OFORK_24,
+    OFORK_16X,
+    OFORK_8_16X
+  };
 
   template<OFork_Style ofork_style>
   inline void ofork_buffer(unsigned char *dest, unsigned char *source,

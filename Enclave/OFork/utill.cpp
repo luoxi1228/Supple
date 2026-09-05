@@ -286,6 +286,16 @@ bool ApplyLevelOrdered(unsigned char *data,
     return ApplyLevelOrderedWithStyle<OFORK_12>(
         data, n, block_size, controls, control_count);
   }
+  if (block_size == 16)
+  {
+    return ApplyLevelOrderedWithStyle<OFORK_16>(
+        data, n, block_size, controls, control_count);
+  }
+  if (block_size == 24)
+  {
+    return ApplyLevelOrderedWithStyle<OFORK_24>(
+        data, n, block_size, controls, control_count);
+  }
   if (block_size % 16 == 0)
   {
     return ApplyLevelOrderedWithStyle<OFORK_16X>(
