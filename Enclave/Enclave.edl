@@ -58,7 +58,7 @@ enclave {
     from "SubSample/SubSample.edl" import *;
     from "PSQF19/SWO/PSQF_SWO.edl" import *;
     from "SubSample_v2/SWO/SuppleSWO.edl" import *;
-    from "SubSample_v2/SWO/SuppleSWO_parallel.edl" import *;
+    from "SubSample_v2_Par/SuppleSWO_parallel.edl" import *;
     from "OFork/OFork.edl" import *;
 
     /*

@@ -1,11 +1,33 @@
 #include "SuppleSWO.hpp"
-
+#ifndef BEFTS_MODE
+#include "../../ObliviousPrimitives.hpp"
+#include "../../utils.hpp"
+#endif
 #include <algorithm>
 #include <cstring>
-#include <cstdint>
 #include <cstdlib>
+#include <new>
+#include <stdexcept>
 
-std::vector<size_t> MARKMATRIX(size_t n, size_t m, size_t k)
+using namespace swo_detail;
+
+// SWOSample orchestrates the offline membership/control and online data phases.
+std::vector<unsigned char> SWOSample(const unsigned char *D,size_t n, size_t m, size_t k,size_t block_size)
+{
+  if (D == nullptr || n == 0 || m == 0 || k == 0 || block_size == 0)
+    return {};
+  m = std::min(m, n); // Retain the existing C++ boundary behavior.
+  std::vector<FrontierNode> F;
+  size_t mk = 0;
+  if (MulOverflowSizeT(m, k, &mk) || mk > n)
+    F = SWOFrontier(n, m, k);
+  const std::vector<size_t> M = SWOMark(n, m, k);
+  const std::vector<uint8_t> C = SWOControl(M, F, n, m, k);
+  return SWOApply(D, C, F, n, m, k, block_size);
+}
+
+// Each record carries k membership bits, stored in consecutive machine words.
+std::vector<size_t> SWOMark(size_t n, size_t m, size_t k)
 {
   const size_t mark_words = MarkWords(k);
   size_t mark_list_size = 0;
@@ -68,609 +90,198 @@ std::vector<size_t> MARKMATRIX(size_t n, size_t m, size_t k)
   return M;
 }
 
-std::vector<FrontierNode> FRONTIER(size_t s, size_t l, size_t n, size_t m)
+std::vector<FrontierNode> SWOFrontier(size_t n, size_t m, size_t k)
 {
-  if (l == 0)
+  if (k == 0)
+    return {};
+  std::vector<FrontierNode> F{{0, k}};
+  for (size_t v = 0; v < F.size();)
   {
-    return std::vector<FrontierNode>();
-  }
-
-  size_t ml = 0;
-  const bool overflow = MulOverflowSizeT(m, l, &ml);
-  if (l == 1 || (!overflow && ml < n))
-  {
-    std::vector<FrontierNode> F;
-    F.push_back(FrontierNode{s, l});
-    return F;
-  }
-
-  const size_t l_left = l / 2;
-  const size_t l_right = l - l_left;
-  std::vector<FrontierNode> F_left = FRONTIER(s, l_left, n, m);
-  std::vector<FrontierNode> F_right = FRONTIER(s + l_left, l_right, n, m);
-
-  F_left.insert(F_left.end(), F_right.begin(), F_right.end());
-  return F_left;
-}
-
-std::vector<FrontierNode> NEXTNODES(const std::vector<FrontierNode> &F, size_t k)
-{
-  if (!F.empty())
-  {
-    return F;
-  }
-
-  std::vector<FrontierNode> V;
-  if (k <= 1)
-  {
-    return V;
-  }
-
-  const size_t k_left = k / 2;
-  const size_t k_right = k - k_left;
-  V.push_back(FrontierNode{0, k_left});
-  V.push_back(FrontierNode{k_left, k_right});
-  return V;
-}
-
-struct ControlNumCacheEntry
-{
-  size_t n;
-  size_t m;
-  size_t k;
-  size_t value;
-};
-
-static const size_t kControlNumCacheCapacity = 4096;
-static ControlNumCacheEntry g_control_num_cache[kControlNumCacheCapacity];
-static size_t g_control_num_cache_size = 0;
-
-size_t CONTROLNUM(const std::vector<FrontierNode> &F, size_t n, size_t m, size_t k)
-{
-  if (k <= 1)
-  {
-    return 0;
-  }
-
-  if (F.empty())
-  {
-    for (size_t i = 0; i < g_control_num_cache_size; i++)
+    const FrontierNode node = F[v];
+    size_t capacity = 0;
+    const bool overflow = MulOverflowSizeT(m, node.count, &capacity);
+    if (node.count == 1 || (!overflow && capacity <= n))
     {
-      if (g_control_num_cache[i].n == n &&
-          g_control_num_cache[i].m == m &&
-          g_control_num_cache[i].k == k)
-      {
-        return g_control_num_cache[i].value;
-      }
+      ++v;
+    }
+    else
+    {
+      const size_t left = node.count / 2;
+      F[v] = {node.start, left};
+      F.insert(F.begin() + v + 1, {node.start + left, node.count - left});
     }
   }
-
-  const std::vector<FrontierNode> V = NEXTNODES(F, k);
-  size_t L = 0;
-  const std::vector<FrontierNode> empty_frontier;
-
-  for (size_t i = 0; i < V.size(); i++)
-  {
-    size_t ml = 0;
-    const bool overflow = MulOverflowSizeT(m, V[i].count, &ml);
-    const size_t tv = overflow ? n : std::min(n, ml);
-
-    const size_t child = CONTROLNUM(empty_frontier, tv, m, V[i].count);
-    size_t with_node = 0;
-    size_t next_L = 0;
-    if (AddOverflowSizeT(L, n, &with_node) ||
-        AddOverflowSizeT(with_node, child, &next_L))
-    {
-      return 0;
-    }
-    L = next_L;
-  }
-
-  if (F.empty())
-  {
-    if (g_control_num_cache_size < kControlNumCacheCapacity)
-    {
-      ControlNumCacheEntry entry = {n, m, k, L};
-      g_control_num_cache[g_control_num_cache_size++] = entry;
-    }
-  }
-  return L;
+  return F;
 }
 
-std::vector<uint8_t> CONTROLBITS(const std::vector<size_t> &M,
-                                 const std::vector<FrontierNode> &F,
-                                 size_t n,
-                                 size_t m,
-                                 size_t k)
+std::vector<uint8_t> SWOControl(const std::vector<size_t> &M,const std::vector<FrontierNode> &F,size_t n, size_t m, size_t k)
 {
-  const size_t L = CONTROLNUM(F, n, m, k);
-  size_t rounded_bits = 0;
-  if (AddOverflowSizeT(L, 7, &rounded_bits))
-  {
-    return std::vector<uint8_t>();
-  }
-  std::vector<uint8_t> C(rounded_bits / 8, 0);
-  const size_t p = CONTROLWRITE(M, C, F, m, k, 0);
-  (void)p;
+  const std::vector<FrontierNode> nodes = SwoRootNodes(F, k);
+  const size_t bits = SWOControlCount(nodes, n, m);
+  std::vector<uint8_t> C(bits / 8 + (bits % 8 != 0), 0);
+  if (SWOControlWrite(M, C, nodes, n, m, 0) != bits)
+    throw std::logic_error("SWO control write/count mismatch");
   return C;
 }
 
-size_t CONTROLWRITE(const std::vector<size_t> &M,
-                    std::vector<uint8_t> &C,
-                    const std::vector<FrontierNode> &F,
-                    size_t m,
-                    size_t k,
-                    size_t p)
+std::vector<unsigned char> SWOApply(const unsigned char *D,
+    const std::vector<uint8_t> &C,
+    const std::vector<FrontierNode> &F,
+    size_t n, size_t m, size_t k,
+    size_t block_size)
 {
-  const size_t mark_words = MarkWords(k);
-  if (k <= 1 || mark_words == 0)
-  {
-    return p;
-  }
-
-  const size_t n = (mark_words == 0) ? 0 : (M.size() / mark_words);
-  std::vector<SwoMarkWorkspace> workspaces(WorkspaceDepth(k));
-  return CONTROLWRITE_WORKSPACE(M.data(),
-                                n,
-                                mark_words,
-                                C,
-                                F,
-                                m,
-                                k,
-                                p,
-                                workspaces,
-                                0);
-}
-
-size_t CONTROLWRITE_WORKSPACE(const size_t *M,
-                              size_t n,
-                              size_t mark_words,
-                              std::vector<uint8_t> &C,
-                              const std::vector<FrontierNode> &F,
-                              size_t m,
-                              size_t k,
-                              size_t p,
-                              std::vector<SwoMarkWorkspace> &workspaces,
-                              size_t depth)
-{
-  if (M == nullptr || k <= 1 || mark_words == 0)
-  {
-    return p;
-  }
-
-  const std::vector<FrontierNode> V = NEXTNODES(F, k);
-  const std::vector<FrontierNode> empty_frontier;
-
-  for (size_t i = 0; i < V.size(); i++)
-  {
-    const FrontierNode node = V[i];
-
-    size_t ml = 0;
-    const bool overflow = MulOverflowSizeT(m, node.count, &ml);
-    const size_t tv = overflow ? n : std::min(n, ml);
-
-    bool *selected = AcquireSelectedScratchA(n);
-    if (selected == nullptr || depth >= workspaces.size())
-    {
-      return p;
-    }
-
-    MarkSliceRange node_range;
-    MakeMarkSliceRange(mark_words, node.start, node.count, &node_range);
-
-    SwoMarkWorkspace &child_ws = workspaces[depth];
-    CompactMarkToWorkspaceAndControl(M,
-                                     n,
-                                     mark_words,
-                                     selected,
-                                     tv,
-                                     node_range,
-                                     C,
-                                     p,
-                                     child_ws);
-    if (AddOverflowSizeT(p, n, &p))
-    {
-      return p;
-    }
-
-    p = CONTROLWRITE_WORKSPACE(child_ws.mark_ptr(),
-                               child_ws.item_count,
-                               MarkWords(node.count),
-                               C,
-                               empty_frontier,
-                               m,
-                               node.count,
-                               p,
-                               workspaces,
-                               depth + 1);
-  }
-
-  return p;
-}
-
-std::vector<unsigned char> RECSAMPLE(const unsigned char *D,
-                                     const std::vector<uint8_t> &C,
-                                     const std::vector<FrontierNode> &F,
-                                     size_t n,
-                                     size_t m,
-                                     size_t k,
-                                     size_t block_size)
-{
-  if (D == nullptr)
-  {
-    return std::vector<unsigned char>();
-  }
-
-  const size_t total_blocks = OutputBlocksFor(n, m, k);
-  size_t result_bytes = 0;
-  if (MulOverflowSizeT(total_blocks, block_size, &result_bytes))
-  {
-    return std::vector<unsigned char>();
-  }
-
-  std::vector<unsigned char> S(result_bytes, 0);
-  std::vector<unsigned char> mutable_D;
-  size_t input_bytes = 0;
-  if (MulOverflowSizeT(n, block_size, &input_bytes))
-  {
-    return std::vector<unsigned char>();
-  }
-  mutable_D.resize(input_bytes);
-  if (input_bytes > 0)
-  {
-    std::memcpy(mutable_D.data(), D, input_bytes);
-  }
-  CONTROLREAD(mutable_D.data(), C, F, n, m, k, block_size,
-              S.data(), total_blocks, 0);
+  size_t blocks = 0, bytes = 0;
+  if (MulOverflowSizeT(m, k, &blocks) || MulOverflowSizeT(blocks, block_size, &bytes))
+    throw std::length_error("SWO output size overflow");
+  const std::vector<FrontierNode> nodes = SwoRootNodes(F, k);
+  const size_t bits = SWOControlCount(nodes, n, m);
+  if (C.size() != bits / 8 + (bits % 8 != 0))
+    throw std::length_error("SWO control array length mismatch");
+  std::vector<unsigned char> S(bytes);
+  const ControlReadResult result =
+      SWOControlRead(D, C, nodes, n, m, block_size, S.data(), blocks, 0);
+  if (result.next_pos != bits || result.written_blocks != blocks)
+    throw std::logic_error("SWO control consumption/output count mismatch");
   return S;
 }
 
-ControlReadResult CONTROLREAD(unsigned char *D,
-                              const std::vector<uint8_t> &C,
-                              const std::vector<FrontierNode> &F,
-                              size_t n,
-                              size_t m,
-                              size_t k,
-                              size_t block_size,
-                              unsigned char *S,
-                              size_t out_capacity_blocks,
-                              size_t p)
+size_t SWOControlCount(const std::vector<FrontierNode> &nodes, size_t n, size_t m)
 {
-  std::vector<SwoDataWorkspace> workspaces(WorkspaceDepth(k));
-  return CONTROLREAD_WORKSPACE(D,
-                               C,
-                               F,
-                               n,
-                               m,
-                               k,
-                               block_size,
-                               S,
-                               out_capacity_blocks,
-                               p,
-                               workspaces,
-                               0);
+  size_t bits = 0;
+  for (const FrontierNode &node : nodes)
+  {
+    const size_t nv = SwoNodeCapacity(n, m, node.count);
+    const size_t edge_bits = nv < n ? n : 0;
+    const size_t child_bits = node.count > 1
+        ? SWOControlCount(SwoChildren(node.count), nv, m) : 0;
+    if (AddOverflowSizeT(bits, edge_bits, &bits) ||
+        AddOverflowSizeT(bits, child_bits, &bits))
+      throw std::length_error("SWO control count overflow");
+  }
+  return bits;
 }
 
-ControlReadResult CONTROLREAD_WORKSPACE(unsigned char *D,
-                                        const std::vector<uint8_t> &C,
-                                        const std::vector<FrontierNode> &F,
-                                        size_t n,
-                                        size_t m,
-                                        size_t k,
-                                        size_t block_size,
-                                        unsigned char *S,
-                                        size_t out_capacity_blocks,
-                                        size_t p,
-                                        std::vector<SwoDataWorkspace> &workspaces,
-                                        size_t depth)
+// Internal overloads reuse one workspace per recursion depth. Public overloads
+// allocate the workspace once; control offsets always count bits.
+static size_t SWOControlWrite(const size_t *M, size_t mark_words,
+    std::vector<uint8_t> &C,
+    const std::vector<FrontierNode> &nodes,
+    size_t n, size_t m, size_t p,
+    std::vector<SwoMarkWorkspace> &workspaces, size_t depth)
 {
-  ControlReadResult result = {0, p};
-  if (D == nullptr || S == nullptr || block_size == 0 || out_capacity_blocks == 0)
+  for (const FrontierNode &node : nodes)
   {
-    return result;
-  }
-
-  if (k <= 1)
-  {
-    size_t copy_count = std::min(m, n);
-    copy_count = std::min(copy_count, out_capacity_blocks);
-    if (copy_count > 0)
+    const size_t nv = SwoNodeCapacity(n, m, node.count);
+    SwoMarkWorkspace &child = workspaces[depth];
+    if (nv < n)
     {
-      std::memcpy(S, D, copy_count * block_size);
-      // RecursiveShuffle_M2(S, copy_count, block_size); //任务调整
+      SwoCheckControlSpan(C, p, n);
+      bool *selected = AcquireSelectedScratch(n);
+      if (selected == nullptr)
+        throw std::bad_alloc();
+      // Projecting before Compact saves metadata bandwidth. The permutation
+      // depends only on the flags, so this commutes with the LaTeX projection.
+      CompactMarkToWorkspaceAndControl(M, n, mark_words, selected, nv,
+                                       node.start, node.count, C, p, child);
+      p += n;
     }
-    result.written_blocks = copy_count;
-    return result;
+    else
+    {
+      // No selection flags or Compact; membership still needs re-numbering.
+      ProjectMarkToWorkspace(M, n, mark_words, node.start, node.count, child);
+    }
+    if (node.count > 1)
+      p = SWOControlWrite(child.mark_ptr(), MarkWords(node.count), C,
+                        SwoChildren(node.count), nv, m, p, workspaces, depth + 1);
   }
+  return p;
+}
 
-  const std::vector<FrontierNode> V = NEXTNODES(F, k);
-  const std::vector<FrontierNode> empty_frontier;
+size_t SWOControlWrite(const std::vector<size_t> &M, std::vector<uint8_t> &C,
+    const std::vector<FrontierNode> &nodes,
+    size_t n, size_t m, size_t p)
+{
+  if (n == 0 || M.size() % n != 0 || M.empty())
+    throw std::invalid_argument("SWO membership dimensions mismatch");
+  std::vector<SwoMarkWorkspace> workspaces(SwoNodeDepth(nodes));
+  return SWOControlWrite(M.data(), M.size() / n, C, nodes, n, m, p, workspaces, 0);
+}
+
+static ControlReadResult SWOControlRead(const unsigned char *D,
+    const std::vector<uint8_t> &C,
+    const std::vector<FrontierNode> &nodes,
+    size_t n, size_t m, size_t block_size,
+    unsigned char *S, size_t out_capacity_blocks,
+    size_t p, std::vector<SwoDataWorkspace> &workspaces,
+    size_t depth)
+{
   size_t written = 0;
-
-  if (V.size() == 2)
+  for (const FrontierNode &node : nodes)
   {
-    if (depth >= workspaces.size())
+    const size_t nv = SwoNodeCapacity(n, m, node.count);
+    SwoDataWorkspace &child = workspaces[depth];
+    child.ensure_capacity(n, block_size);
+    // Keep the parent unchanged: all Frontier targets refer to the same D.
+    std::memcpy(child.data_ptr(), D, n * block_size);
+    if (nv < n)
     {
-      result.next_pos = p;
-      return result;
+      SwoCheckControlSpan(C, p, n);
+      bool *selected = AcquireSelectedScratch(n);
+      if (selected == nullptr)
+        throw std::bad_alloc();
+      UnpackControlBitsToBoolArray(C, p, n, selected);
+      p += n;
+      TightCompact_v2(child.data_ptr(), n, block_size, selected); //非稳定版本
     }
-
-    const FrontierNode left_node = V[0];
-    const FrontierNode right_node = V[1];
-
-    size_t ml_left = 0;
-    size_t ml_right = 0;
-    const bool overflow_left = MulOverflowSizeT(m, left_node.count, &ml_left);
-    const bool overflow_right = MulOverflowSizeT(m, right_node.count, &ml_right);
-    const size_t tv_left = overflow_left ? n : std::min(n, ml_left);
-    const size_t tv_right = overflow_right ? n : std::min(n, ml_right);
-
-    bool *selected_left = AcquireSelectedScratchA(n);
-    bool *selected_right = AcquireSelectedScratchB(n);
-    if (selected_left == nullptr || selected_right == nullptr)
+    if (node.count == 1)
     {
-      result.next_pos = p;
-      return result;
+      if (nv != m || m > out_capacity_blocks - written)
+        throw std::length_error("SWO leaf output capacity mismatch");
+      unsigned char *sample = S + written * block_size;
+      std::memcpy(sample, child.data_ptr(), m * block_size);
+      RecursiveShuffle_M2(sample, m, block_size);
+      written += m;
     }
-
-    size_t p_left_child = 0;
-    if (AddOverflowSizeT(p, n, &p_left_child))
+    else
     {
-      result.next_pos = p;
-      return result;
-    }
-
-    const size_t left_child_bits =
-        CONTROLNUM(empty_frontier, tv_left, m, left_node.count);
-    size_t p_right = 0;
-    if (AddOverflowSizeT(p_left_child, left_child_bits, &p_right))
-    {
-      result.next_pos = p;
-      return result;
-    }
-
-    size_t p_right_child = 0;
-    if (AddOverflowSizeT(p_right, n, &p_right_child))
-    {
-      result.next_pos = p;
-      return result;
-    }
-
-    UnpackControlBitsToBoolArray(C, p, n, selected_left);
-    UnpackControlBitsToBoolArray(C, p_right, n, selected_right);
-
-    SwoDataWorkspace &right_ws = workspaces[depth];
-    CompactDataToWorkspace(D, n, selected_right, tv_right, block_size, right_ws);
-    const size_t left_items =
-        CompactDataInPlace(D, n, selected_left, tv_left, block_size);
-
-    ControlReadResult left_child =
-        CONTROLREAD_WORKSPACE(D,
-                              C,
-                              empty_frontier,
-                              left_items,
-                              m,
-                              left_node.count,
-                              block_size,
-                              S,
-                              out_capacity_blocks,
-                              p_left_child,
-                              workspaces,
-                              depth + 1);
-
-    written = left_child.written_blocks;
-    if (written >= out_capacity_blocks)
-    {
-      result.written_blocks = written;
-      result.next_pos = left_child.next_pos;
-      return result;
-    }
-
-    ControlReadResult right_child =
-        CONTROLREAD_WORKSPACE(right_ws.data_ptr(),
-                              C,
-                              empty_frontier,
-                              right_ws.item_count,
-                              m,
-                              right_node.count,
-                              block_size,
-                              S + (written * block_size),
-                              out_capacity_blocks - written,
-                              p_right_child,
-                              workspaces,
-                              depth + 1);
-
-    written += right_child.written_blocks;
-    result.written_blocks = written;
-    result.next_pos = right_child.next_pos;
-    return result;
-  }
-
-  for (size_t i = 0; i < V.size(); i++)
-  {
-    const FrontierNode node = V[i];
-
-    size_t ml = 0;
-    const bool overflow = MulOverflowSizeT(m, node.count, &ml);
-    const size_t tv = overflow ? n : std::min(n, ml);
-
-    bool *selected = AcquireSelectedScratchA(n);
-    if (selected == nullptr || depth >= workspaces.size())
-    {
-      result.written_blocks = written;
-      result.next_pos = p;
-      return result;
-    }
-
-    UnpackControlBitsToBoolArray(C, p, n, selected);
-    if (AddOverflowSizeT(p, n, &p))
-    {
-      result.written_blocks = written;
-      result.next_pos = p;
-      return result;
-    }
-
-    SwoDataWorkspace &child_ws = workspaces[depth];
-    CompactDataToWorkspace(D, n, selected, tv, block_size, child_ws);
-
-    ControlReadResult child =
-        CONTROLREAD_WORKSPACE(child_ws.data_ptr(),
-                              C,
-                              empty_frontier,
-                              child_ws.item_count,
-                              m,
-                              node.count,
-                              block_size,
-                              S + (written * block_size),
-                              out_capacity_blocks - written,
-                              p,
-                              workspaces,
-                              depth + 1);
-
-    written += child.written_blocks;
-    p = child.next_pos;
-    if (written >= out_capacity_blocks)
-    {
-      break;
+      const ControlReadResult result =
+          SWOControlRead(child.data_ptr(), C, SwoChildren(node.count), nv, m,
+                        block_size, S + written * block_size,
+                        out_capacity_blocks - written, p, workspaces, depth + 1);
+      written += result.written_blocks;
+      p = result.next_pos;
     }
   }
-
-  result.written_blocks = written;
-  result.next_pos = p;
-  return result;
+  return {written, p};
 }
 
-std::vector<unsigned char> FILTERDATA(const unsigned char *D,
-                                      const std::vector<uint8_t> &Cv,
-                                      size_t n,
-                                      size_t t,
-                                      size_t block_size)
+ControlReadResult SWOControlRead(const unsigned char *D,
+    const std::vector<uint8_t> &C,
+    const std::vector<FrontierNode> &nodes,
+    size_t n, size_t m, size_t block_size,
+    unsigned char *S, size_t out_capacity_blocks,
+    size_t p)
 {
-  size_t data_bytes = 0;
-  if (D == nullptr || block_size == 0 || MulOverflowSizeT(n, block_size, &data_bytes))
-  {
-    return std::vector<unsigned char>();
-  }
-
-  std::vector<unsigned char> D0(data_bytes, 0);
-  if (data_bytes > 0)
-  {
-    std::memcpy(D0.data(), D, data_bytes);
-  }
-
-  bool *selected = AcquireSelectedScratchA(n);
-  if (selected == nullptr)
-  {
-    return std::vector<unsigned char>();
-  }
-  UnpackControlBitsToBoolArray(Cv, 0, n, selected);
-
-  TightCompact_v2(D0.data(), n, block_size, selected);
-
-  size_t out_bytes = 0;
-  t = std::min(t, n);
-  if (MulOverflowSizeT(t, block_size, &out_bytes))
-  {
-    return std::vector<unsigned char>();
-  }
-  D0.resize(out_bytes);
-  return D0;
+  size_t bytes = 0;
+  if (D == nullptr || S == nullptr || block_size == 0 ||
+      MulOverflowSizeT(n, block_size, &bytes) ||
+      MulOverflowSizeT(out_capacity_blocks, block_size, &bytes))
+    throw std::invalid_argument("Invalid SWO data/output buffer dimensions");
+  std::vector<SwoDataWorkspace> workspaces(SwoNodeDepth(nodes));
+  return SWOControlRead(D, C, nodes, n, m, block_size, S, out_capacity_blocks,
+                      p, workspaces, 0);
 }
 
-std::vector<size_t> FILTERMARK(const std::vector<size_t> &M,
-                               const std::vector<uint8_t> &Cv,
-                               size_t t,
-                               size_t s,
-                               size_t l,
-                               size_t k)
+// ECALL adapter: encryption, PRB lifetime and timing wrap the serial algorithms.
+extern "C" void DecSuppleSWO(unsigned char *encrypted_buffer,
+    size_t N,
+    size_t M,
+    size_t K,
+    size_t encrypted_block_size,
+    unsigned char *encrypt_result_buffer,
+    enc_ret *ret)
 {
-  const size_t src_words = MarkWords(k);
-  const size_t dst_words = MarkWords(l);
-  if (src_words == 0 || dst_words == 0)
-  {
-    return std::vector<size_t>();
-  }
-
-  const size_t n = M.size() / src_words;
-  t = std::min(t, n);
-
-  std::vector<size_t> projected(n * dst_words, 0);
-  if (dst_words == 1)
-  {
-    for (size_t i = 0; i < n; i++)
-    {
-      projected[i] = ProjectMarkSliceOneWord(M.data() + (i * src_words),
-                                             src_words,
-                                             s,
-                                             l);
-    }
-  }
-  else
-  {
-    for (size_t i = 0; i < n; i++)
-    {
-      ProjectMarkSlice(M.data() + (i * src_words),
-                       src_words,
-                       s,
-                       l,
-                       projected.data() + (i * dst_words),
-                       dst_words);
-    }
-  }
-
-  bool *selected = AcquireSelectedScratchB(n);
-  if (selected == nullptr)
-  {
-    return std::vector<size_t>();
-  }
-  UnpackControlBitsToBoolArray(Cv, 0, n, selected);
-
-  TightCompact_v2(reinterpret_cast<unsigned char *>(projected.data()),
-                  n,
-                  sizeof(size_t) * dst_words,
-                  selected);
-
-  projected.resize(t * dst_words);
-  return projected;
-}
-
-std::vector<unsigned char> OMBSUBSAMPLE(const unsigned char *D,
-                                        size_t n,
-                                        size_t m,
-                                        size_t k,
-                                        size_t block_size)
-{
-  if (D == nullptr || n == 0 || m == 0 || k == 0 || block_size == 0)
-  {
-    return std::vector<unsigned char>();
-  }
-  if (m > n)
-  {
-    m = n;
-  }
-
-  std::vector<size_t> M = MARKMATRIX(n, m, k);
-
-  std::vector<FrontierNode> F;
-  size_t mk = 0;
-  const bool overflow = MulOverflowSizeT(m, k, &mk);
-  if (overflow || mk > n)
-  {
-    F = FRONTIER(0, k, n, m);
-  }
-
-  std::vector<uint8_t> C = CONTROLBITS(M, F, n, m, k);
-  return RECSAMPLE(D, C, F, n, m, k, block_size);
-}
-
-void DecSuppleSWO(unsigned char *encrypted_buffer,
-                  size_t N,
-                  size_t M,
-                  size_t K,
-                  size_t encrypted_block_size,
-                  unsigned char *encrypt_result_buffer,
-                  enc_ret *ret)
-{
+  using namespace swo_detail;
   unsigned char *decrypted_buffer = NULL;
   const size_t decrypted_block_size =
       decryptBuffer(encrypted_buffer, static_cast<uint64_t>(N),
@@ -725,17 +336,19 @@ void DecSuppleSWO(unsigned char *encrypted_buffer,
   long t0, t1;
 
   ocall_clock(&t0);
-  std::vector<size_t> M_matrix = MARKMATRIX(N, M, K);
+  std::vector<size_t> M_matrix = SWOMark(N, M, K);
 
   std::vector<FrontierNode> F;
   size_t mk = 0;
   const bool frontier_overflow = MulOverflowSizeT(M, K, &mk);
   if (frontier_overflow || mk > N)
   {
-    F = FRONTIER(0, K, N, M);
+    F = SWOFrontier(N, M, K);
   }
 
-  std::vector<uint8_t> C = CONTROLBITS(M_matrix, F, N, M, K);
+  const std::vector<FrontierNode> nodes = SwoRootNodes(F, K);
+  const size_t control_bits = SWOControlCount(nodes, N, M);
+  std::vector<uint8_t> C = SWOControl(M_matrix, F, N, M, K);
   std::vector<size_t>().swap(M_matrix);
   ocall_clock(&t1);
   ret->gen_perm_time = static_cast<double>(t1 - t0) / 1000.0;
@@ -747,8 +360,9 @@ void DecSuppleSWO(unsigned char *encrypted_buffer,
   std::vector<unsigned char> plain_result(result_bytes, 0);
 
   ocall_clock(&t0);
-  CONTROLREAD(decrypted_buffer, C, F, N, M, K, decrypted_block_size,
-              plain_result.data(), total_blocks, 0);
+  const ControlReadResult result =
+      SWOControlRead(decrypted_buffer, C, nodes, N, M, decrypted_block_size,
+                     plain_result.data(), total_blocks, 0);
   ocall_clock(&t1);
   ret->apply_perm_time = static_cast<double>(t1 - t0) / 1000.0;
   ret->ptime = ret->gen_perm_time + ret->apply_perm_time;
@@ -757,8 +371,11 @@ void DecSuppleSWO(unsigned char *encrypted_buffer,
   ret->OSWAP_count = OSWAP_COUNTER - initial_oswaps;
 #endif
 
-  encryptBuffer(plain_result.data(), static_cast<uint64_t>(total_blocks),
-                decrypted_block_size, encrypt_result_buffer);
+  if (result.next_pos == control_bits && result.written_blocks == total_blocks)
+  {
+    encryptBuffer(plain_result.data(), static_cast<uint64_t>(total_blocks),
+                  decrypted_block_size, encrypt_result_buffer);
+  }
 
   PRB_pool_shutdown();
   free(decrypted_buffer);

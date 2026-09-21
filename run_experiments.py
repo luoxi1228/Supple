@@ -32,14 +32,14 @@ def available_cpu_count():
   return max(1, len(physical_cores))
 
 
-DEFAULT_MODE = [7]
+DEFAULT_MODE = [6]
 DEFAULT_P = [0.015625]
 DEFAULT_N = [1048576]
-DEFAULT_K = [16, 64, 256, 1024]
+DEFAULT_K = [16, 64, 256]
 DEFAULT_K_SELECT = 2   # 1 => k = 1/p, 2 => use --k list
 DEFAULT_BLOCK_SIZE = [16]
-DEFAULT_REPEAT = 10
-DEFAULT_THREADS = 4 #available_cpu_count()
+DEFAULT_REPEAT = 2
+DEFAULT_THREADS = 1 #available_cpu_count()
 
 BASE_HEAP = 1000000
 SIZE_T_BYTES = int(os.getenv("SIZE_T_BYTES", "8"))

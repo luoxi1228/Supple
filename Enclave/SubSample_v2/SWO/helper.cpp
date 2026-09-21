@@ -1,8 +1,35 @@
-#include "SuppleSWO.hpp"
-
+#include "helper.hpp"
+#ifndef BEFTS_MODE
+#include "../../ObliviousPrimitives.hpp"
+#endif
 #include <algorithm>
-#include <cstring>
 #include <new>
+#include <stdexcept>
+
+namespace swo_detail
+{
+
+size_t *SwoMarkWorkspace::mark_ptr() { return mark_buf.data(); }
+
+void SwoMarkWorkspace::ensure_capacity(size_t items, size_t words)
+{
+  size_t required = 0;
+  if (MulOverflowSizeT(items, words, &required))
+    throw std::length_error("SWO membership workspace size overflow");
+  if (mark_buf.size() < required)
+    mark_buf.resize(required);
+}
+
+unsigned char *SwoDataWorkspace::data_ptr() { return data_buf.data(); }
+
+void SwoDataWorkspace::ensure_capacity(size_t items, size_t width)
+{
+  size_t required = 0;
+  if (MulOverflowSizeT(items, width, &required))
+    throw std::length_error("SWO data workspace size overflow");
+  if (data_buf.size() < required)
+    data_buf.resize(required);
+}
 
 size_t MarkWords(size_t k)
 {
@@ -18,7 +45,7 @@ size_t WorkspaceDepth(size_t k)
   size_t depth = 1;
   while (k > 1)
   {
-    k = (k + 1) / 2;
+    k = k / 2 + k % 2;
     depth++;
   }
   return depth + 1;
@@ -57,135 +84,10 @@ bool AddOverflowSizeT(size_t a, size_t b, size_t *out)
   return false;
 }
 
-size_t MakeRangeMarkWord(size_t range_start, size_t range_end, size_t word_index)
-{
-  if (range_end <= range_start)
-  {
-    return 0;
-  }
-
-  const size_t word_start = word_index * SwoWordBits();
-  const size_t word_end = word_start + SwoWordBits();
-  if (range_end <= word_start || range_start >= word_end)
-  {
-    return 0;
-  }
-
-  const size_t local_start = (range_start > word_start) ? (range_start - word_start) : 0;
-  const size_t local_end =
-      (range_end < word_end) ? (range_end - word_start) : SwoWordBits();
-  const size_t width = local_end - local_start;
-
-  if (width >= SwoWordBits())
-  {
-    return ~size_t(0);
-  }
-  return ((size_t(1) << width) - 1) << local_start;
-}
-
-void ProjectMarkSlice(const size_t *src_row,
-                      size_t src_words,
-                      size_t slice_start,
-                      size_t slice_bits,
-                      size_t *dst_row,
-                      size_t dst_words)
-{
-  if (slice_bits == 0 || dst_words == 0)
-  {
-    return;
-  }
-
-  for (size_t w = 0; w < dst_words; w++)
-  {
-    const size_t bit_pos = slice_start + (w * SwoWordBits());
-    const size_t src_w = bit_pos / SwoWordBits();
-    const size_t off = bit_pos % SwoWordBits();
-
-    const size_t low = (src_w < src_words) ? (src_row[src_w] >> off) : 0;
-    size_t high = 0;
-    if (off != 0 && (src_w + 1) < src_words)
-    {
-      high = src_row[src_w + 1] << (SwoWordBits() - off);
-    }
-
-    dst_row[w] = (low | high);
-  }
-
-  const size_t valid_bits_last_word = slice_bits % SwoWordBits();
-  if (valid_bits_last_word != 0)
-  {
-    const size_t keep = (size_t(1) << valid_bits_last_word) - 1;
-    dst_row[dst_words - 1] &= keep;
-  }
-}
-
-bool *AcquireSelectedScratchA(size_t required)
-{
-  thread_local bool *scratch = nullptr;
-  thread_local size_t capacity = 0;
-
-  if (required == 0)
-  {
-    return scratch;
-  }
-  if (required <= capacity)
-  {
-    return scratch;
-  }
-
-  bool *new_scratch = new (std::nothrow) bool[required];
-  if (new_scratch == nullptr)
-  {
-    return nullptr;
-  }
-
-  delete[] scratch;
-  scratch = new_scratch;
-  capacity = required;
-  return scratch;
-}
-
-bool *AcquireSelectedScratchB(size_t required)
-{
-  thread_local bool *scratch = nullptr;
-  thread_local size_t capacity = 0;
-
-  if (required == 0)
-  {
-    return scratch;
-  }
-  if (required <= capacity)
-  {
-    return scratch;
-  }
-
-  bool *new_scratch = new (std::nothrow) bool[required];
-  if (new_scratch == nullptr)
-  {
-    return nullptr;
-  }
-
-  delete[] scratch;
-  scratch = new_scratch;
-  capacity = required;
-  return scratch;
-}
-
-bool GetControlBit(const std::vector<uint8_t> &C, size_t pos)
-{
-  const size_t byte_index = pos / 8;
-  const size_t bit_index = pos % 8;
-  if (byte_index >= C.size())
-  {
-    return false;
-  }
-  return ((C[byte_index] >> bit_index) & 1U) != 0;
-}
-
 void UnpackControlBitsToBoolArray(const std::vector<uint8_t> &C,
-                                  size_t bit_pos,
-                                  size_t bit_count,
-                                  bool *dst)
+    size_t bit_pos,
+    size_t bit_count,
+    bool *dst)
 {
   if (dst == nullptr || bit_count == 0)
   {
@@ -244,199 +146,46 @@ void UnpackControlBitsToBoolArray(const std::vector<uint8_t> &C,
   }
 }
 
-void PackBoolArrayToControlBits(std::vector<uint8_t> &C,
-                                size_t bit_pos,
-                                size_t bit_count,
-                                const bool *src)
+void ProjectMarkSlice(const size_t *src_row,
+    size_t src_words,
+    size_t slice_start,
+    size_t slice_bits,
+    size_t *dst_row,
+    size_t dst_words)
 {
-  if (src == nullptr || bit_count == 0)
+  if (slice_bits == 0 || dst_words == 0)
   {
     return;
   }
 
-  size_t byte_index = bit_pos / 8;
-  size_t bit_index = bit_pos % 8;
-  size_t in = 0;
-
-  if (byte_index >= C.size())
+  for (size_t w = 0; w < dst_words; w++)
   {
-    return;
-  }
+    const size_t bit_pos = slice_start + (w * SwoWordBits());
+    const size_t src_w = bit_pos / SwoWordBits();
+    const size_t off = bit_pos % SwoWordBits();
 
-  if (bit_index != 0)
-  {
-    uint8_t byte = C[byte_index];
-    while (in < bit_count && bit_index < 8)
+    const size_t low = (src_w < src_words) ? (src_row[src_w] >> off) : 0;
+    size_t high = 0;
+    if (off != 0 && (src_w + 1) < src_words)
     {
-      const uint8_t mask = static_cast<uint8_t>(1U << bit_index);
-      byte = static_cast<uint8_t>(byte & ~mask);
-      byte = static_cast<uint8_t>(byte | (src[in] ? mask : 0));
-      in++;
-      bit_index++;
-    }
-    C[byte_index++] = byte;
-  }
-
-  while ((in + 8) <= bit_count && byte_index < C.size())
-  {
-    uint8_t byte = 0;
-    byte = static_cast<uint8_t>(byte | (src[in + 0] ? 0x01U : 0));
-    byte = static_cast<uint8_t>(byte | (src[in + 1] ? 0x02U : 0));
-    byte = static_cast<uint8_t>(byte | (src[in + 2] ? 0x04U : 0));
-    byte = static_cast<uint8_t>(byte | (src[in + 3] ? 0x08U : 0));
-    byte = static_cast<uint8_t>(byte | (src[in + 4] ? 0x10U : 0));
-    byte = static_cast<uint8_t>(byte | (src[in + 5] ? 0x20U : 0));
-    byte = static_cast<uint8_t>(byte | (src[in + 6] ? 0x40U : 0));
-    byte = static_cast<uint8_t>(byte | (src[in + 7] ? 0x80U : 0));
-    C[byte_index++] = byte;
-    in += 8;
-  }
-
-  if (in < bit_count && byte_index < C.size())
-  {
-    uint8_t byte = C[byte_index];
-    bit_index = 0;
-    while (in < bit_count && bit_index < 8)
-    {
-      const uint8_t mask = static_cast<uint8_t>(1U << bit_index);
-      byte = static_cast<uint8_t>(byte & ~mask);
-      byte = static_cast<uint8_t>(byte | (src[in] ? mask : 0));
-      in++;
-      bit_index++;
-    }
-    C[byte_index] = byte;
-  }
-}
-
-void SetControlBit(std::vector<uint8_t> &C, size_t pos, bool value)
-{
-  const size_t byte_index = pos / 8;
-  const size_t bit_index = pos % 8;
-  if (byte_index >= C.size())
-  {
-    return;
-  }
-
-  const uint8_t mask = static_cast<uint8_t>(1U << bit_index);
-  if (value)
-  {
-    C[byte_index] |= mask;
-  }
-  else
-  {
-    C[byte_index] &= static_cast<uint8_t>(~mask);
-  }
-}
-
-bool RowHasSliceBit(const size_t *row,
-                    size_t row_words,
-                    size_t slice_start,
-                    size_t slice_bits)
-{
-  return RowHasSliceBitOblivious(row, row_words, slice_start, slice_bits);
-}
-
-bool MakeMarkSliceRange(size_t row_words,
-                        size_t slice_start,
-                        size_t slice_bits,
-                        MarkSliceRange *range)
-{
-  if (range == nullptr)
-  {
-    return false;
-  }
-
-  range->first_word = 0;
-  range->last_word = 0;
-  range->first_mask = 0;
-  range->last_mask = 0;
-  range->slice_start = 0;
-  range->slice_bits = 0;
-  range->dst_words = 0;
-  range->valid = false;
-
-  if (row_words == 0 || slice_bits == 0)
-  {
-    return false;
-  }
-
-  size_t slice_end = 0;
-  if (AddOverflowSizeT(slice_start, slice_bits, &slice_end))
-  {
-    return false;
-  }
-
-  const size_t first_word = slice_start / SwoWordBits();
-  if (first_word >= row_words)
-  {
-    return false;
-  }
-
-  size_t last_word = (slice_end - 1) / SwoWordBits();
-  if (last_word >= row_words)
-  {
-    last_word = row_words - 1;
-  }
-
-  range->first_word = first_word;
-  range->last_word = last_word;
-  range->first_mask = MakeRangeMarkWord(slice_start, slice_end, first_word);
-  range->last_mask = MakeRangeMarkWord(slice_start, slice_end, last_word);
-  range->slice_start = slice_start;
-  range->slice_bits = slice_bits;
-  range->dst_words = MarkWords(slice_bits);
-  range->valid = true;
-  return true;
-}
-
-bool RowHasSliceBitOblivious(const size_t *row,
-                             size_t row_words,
-                             size_t slice_start,
-                             size_t slice_bits)
-{
-  MarkSliceRange range;
-  MakeMarkSliceRange(row_words, slice_start, slice_bits, &range);
-  return RowHasSliceBitInRange(row, range);
-}
-
-bool RowHasSliceBitInRange(const size_t *row,
-                           const MarkSliceRange &range)
-{
-  if (row == nullptr || !range.valid)
-  {
-    return false;
-  }
-
-  size_t acc = 0;
-  for (size_t w = range.first_word; w <= range.last_word; w++)
-  {
-    size_t mask = ~size_t(0);
-    if (w == range.first_word)
-    {
-      mask &= range.first_mask;
-    }
-    if (w == range.last_word)
-    {
-      mask &= range.last_mask;
+      high = src_row[src_w + 1] << (SwoWordBits() - off);
     }
 
-    acc |= row[w] & mask;
+    dst_row[w] = (low | high);
   }
-  return acc != 0;
-}
 
-bool RowHasSliceBitFast(const size_t *row,
-                        size_t row_words,
-                        size_t slice_start,
-                        size_t slice_bits)
-{
-  return RowHasSliceBitOblivious(row, row_words, slice_start, slice_bits);
+  const size_t valid_bits_last_word = slice_bits % SwoWordBits();
+  if (valid_bits_last_word != 0)
+  {
+    const size_t keep = (size_t(1) << valid_bits_last_word) - 1;
+    dst_row[dst_words - 1] &= keep;
+  }
 }
 
 size_t ProjectMarkSliceOneWord(const size_t *src_row,
-                               size_t src_words,
-                               size_t slice_start,
-                               size_t slice_bits)
+    size_t src_words,
+    size_t slice_start,
+    size_t slice_bits)
 {
   if (src_row == nullptr || src_words == 0 || slice_bits == 0)
   {
@@ -460,79 +209,77 @@ size_t ProjectMarkSliceOneWord(const size_t *src_row,
   return value;
 }
 
-void CompactMarkToWorkspace(const size_t *mark,
-                            size_t len_items,
-                            size_t src_mark_words,
-                            const bool *selected,
-                            size_t target_size,
-                            size_t slice_start,
-                            size_t slice_bits,
-                            SwoMarkWorkspace &ws)
+void ProjectMarkToWorkspace(const size_t *mark, size_t len_items,
+    size_t src_mark_words, size_t slice_start,
+    size_t slice_bits, SwoMarkWorkspace &ws)
 {
-  const size_t dst_mark_words = MarkWords(slice_bits);
-  ws.ensure_capacity(len_items, dst_mark_words);
-  ws.item_count = std::min(target_size, len_items);
-  ws.mark_words_per_item = dst_mark_words;
-
-  if (mark == nullptr || selected == nullptr || len_items == 0 ||
-      ws.item_count == 0 || src_mark_words == 0 || dst_mark_words == 0)
+  const size_t dst_words = MarkWords(slice_bits);
+  ws.ensure_capacity(len_items, dst_words);
+  for (size_t i = 0; i < len_items; ++i)
   {
-    return;
-  }
-
-  size_t *dst = ws.mark_ptr();
-  if (dst_mark_words == 1)
-  {
-    for (size_t i = 0; i < len_items; i++)
+    const size_t *src = mark + i * src_mark_words;
+    if (dst_words == 1)
     {
-      dst[i] = ProjectMarkSliceOneWord(mark + (i * src_mark_words),
-                                       src_mark_words,
-                                       slice_start,
-                                       slice_bits);
+      ws.mark_ptr()[i] =
+          ProjectMarkSliceOneWord(src, src_mark_words, slice_start, slice_bits);
+    }
+    else
+    {
+      ProjectMarkSlice(src, src_mark_words, slice_start, slice_bits,
+                       ws.mark_ptr() + i * dst_words, dst_words);
     }
   }
-  else
+}
+
+// SGX's trusted runtime has no TLS destructors; retain the per-thread scratch
+// allocation as a raw pointer and release its previous buffer when it grows.
+bool *AcquireSelectedScratch(size_t required)
+{
+  thread_local bool *scratch = nullptr;
+  thread_local size_t capacity = 0;
+
+  if (required == 0)
   {
-    for (size_t i = 0; i < len_items; i++)
-    {
-      ProjectMarkSlice(mark + (i * src_mark_words),
-                       src_mark_words,
-                       slice_start,
-                       slice_bits,
-                       dst + (i * dst_mark_words),
-                       dst_mark_words);
-    }
+    return scratch;
+  }
+  if (required <= capacity)
+  {
+    return scratch;
   }
 
-  TightCompact_v2(reinterpret_cast<unsigned char *>(dst),
-                  len_items,
-                  sizeof(size_t) * dst_mark_words,
-                  const_cast<bool *>(selected));
+  bool *new_scratch = new (std::nothrow) bool[required];
+  if (new_scratch == nullptr)
+  {
+    return nullptr;
+  }
+
+  delete[] scratch;
+  scratch = new_scratch;
+  capacity = required;
+  return scratch;
 }
 
 void CompactMarkToWorkspaceAndControl(const size_t *mark,
-                                      size_t len_items,
-                                      size_t src_mark_words,
-                                      bool *selected,
-                                      size_t target_size,
-                                      const MarkSliceRange &slice_range,
-                                      std::vector<uint8_t> &C,
-                                      size_t bit_pos,
-                                      SwoMarkWorkspace &ws)
+    size_t len_items,
+    size_t src_mark_words,
+    bool *selected,
+    size_t target_size,
+    size_t slice_start,
+    size_t slice_bits,
+    std::vector<uint8_t> &C,
+    size_t bit_pos,
+    SwoMarkWorkspace &ws)
 {
-  const size_t dst_mark_words = slice_range.dst_words;
+  const size_t dst_mark_words = MarkWords(slice_bits);
   ws.ensure_capacity(len_items, dst_mark_words);
-  ws.item_count = std::min(target_size, len_items);
-  ws.mark_words_per_item = dst_mark_words;
 
   if (mark == nullptr || selected == nullptr || len_items == 0 ||
-      src_mark_words == 0 || dst_mark_words == 0 || !slice_range.valid)
+      src_mark_words == 0 || dst_mark_words == 0)
   {
     if (selected != nullptr)
     {
       std::fill(selected, selected + len_items, false);
     }
-    ws.item_count = 0;
     return;
   }
 
@@ -551,8 +298,8 @@ void CompactMarkToWorkspaceAndControl(const size_t *mark,
       const size_t projected =
           ProjectMarkSliceOneWord(src_row,
                                   src_mark_words,
-                                  slice_range.slice_start,
-                                  slice_range.slice_bits);
+                                  slice_start,
+                                  slice_bits);
       dst_row[0] = projected;
       nonzero = projected;
     }
@@ -560,8 +307,8 @@ void CompactMarkToWorkspaceAndControl(const size_t *mark,
     {
       ProjectMarkSlice(src_row,
                        src_mark_words,
-                       slice_range.slice_start,
-                       slice_range.slice_bits,
+                       slice_start,
+                       slice_bits,
                        dst_row,
                        dst_mark_words);
       for (size_t w = 0; w < dst_mark_words; w++)
@@ -591,115 +338,51 @@ void CompactMarkToWorkspaceAndControl(const size_t *mark,
     }
   }
 
-  if (ws.item_count == 0)
+  if (target_size == 0)
   {
     return;
   }
-
+  // 非稳定版本
   TightCompact_v2(reinterpret_cast<unsigned char *>(dst),
                   len_items,
                   sizeof(size_t) * dst_mark_words,
                   selected);
 }
 
-void CompactDataToWorkspace(const unsigned char *data,
-                            size_t len_items,
-                            const bool *selected,
-                            size_t target_size,
-                            size_t block_size,
-                            SwoDataWorkspace &ws)
+size_t SwoNodeCapacity(size_t n, size_t m, size_t k)
 {
-  ws.ensure_capacity(len_items, block_size);
-  ws.item_count = std::min(target_size, len_items);
-
-  if (data == nullptr || selected == nullptr || len_items == 0 ||
-      ws.item_count == 0 || block_size == 0)
-  {
-    return;
-  }
-
-  std::memcpy(ws.data_ptr(), data, len_items * block_size);
-  TightCompact_v2(ws.data_ptr(),
-                  len_items,
-                  block_size,
-                  const_cast<bool *>(selected));
+  size_t capacity = 0;
+  return MulOverflowSizeT(m, k, &capacity) ? n : std::min(n, capacity);
 }
 
-size_t CompactDataInPlace(unsigned char *data,
-                          size_t len_items,
-                          const bool *selected,
-                          size_t target_size,
-                          size_t block_size)
+std::vector<FrontierNode> SwoChildren(size_t k)
 {
-  const size_t item_count = std::min(target_size, len_items);
-  if (data == nullptr || selected == nullptr || len_items == 0 ||
-      item_count == 0 || block_size == 0)
-  {
-    return item_count;
-  }
-
-  TightCompact_v2(data,
-                  len_items,
-                  block_size,
-                  const_cast<bool *>(selected));
-  return item_count;
+  const size_t left = k / 2;
+  return {{0, left}, {left, k - left}};
 }
 
-std::vector<bool> ControlSliceToSelected(const std::vector<uint8_t> &C,
-                                         size_t p,
-                                         size_t n)
+std::vector<FrontierNode> SwoRootNodes(const std::vector<FrontierNode> &F, size_t k)
 {
-  std::vector<bool> selected(n, false);
-  for (size_t i = 0; i < n; i++)
-  {
-    selected[i] = GetControlBit(C, p + i);
-  }
-  return selected;
+  if (!F.empty())
+    return F;
+  // Preserve the C++ single-sample extension, including its initial filtering.
+  return k == 1 ? std::vector<FrontierNode>{{0, 1}} : SwoChildren(k);
 }
 
-void CopyVectorBoolToBoolArray(const std::vector<bool> &src, bool *dst)
+size_t SwoNodeDepth(const std::vector<FrontierNode> &nodes)
 {
-  for (size_t i = 0; i < src.size(); i++)
-  {
-    dst[i] = src[i];
-  }
+  size_t largest = 1;
+  for (const FrontierNode &node : nodes)
+    largest = std::max(largest, node.count);
+  return WorkspaceDepth(largest);
 }
 
-size_t OutputBlocksFor(size_t n, size_t m, size_t k)
+void SwoCheckControlSpan(const std::vector<uint8_t> &C, size_t p, size_t bits)
 {
-  size_t clamped_m = m;
-  if (clamped_m > n)
-  {
-    clamped_m = n;
-  }
-
-  size_t total_blocks = 0;
-  if (MulOverflowSizeT(clamped_m, k, &total_blocks))
-  {
-    return 0;
-  }
-  return total_blocks;
+  size_t end = 0;
+  if (AddOverflowSizeT(p, bits, &end) ||
+      end / 8 + (end % 8 != 0) > C.size())
+    throw std::length_error("SWO control span exceeds preallocated array");
 }
 
-size_t OMBSUBSAMPLE(const unsigned char *D,
-                    size_t n,
-                    size_t m,
-                    size_t k,
-                    size_t block_size,
-                    unsigned char *S,
-                    size_t out_capacity_blocks)
-{
-  if (S == nullptr)
-  {
-    return 0;
-  }
-
-  std::vector<unsigned char> result = OMBSUBSAMPLE(D, n, m, k, block_size);
-  const size_t total_blocks = block_size == 0 ? 0 : (result.size() / block_size);
-  const size_t copy_blocks = std::min(total_blocks, out_capacity_blocks);
-  if (copy_blocks > 0)
-  {
-    std::memcpy(S, result.data(), copy_blocks * block_size);
-  }
-  return copy_blocks;
-}
+} // namespace swo_detail

@@ -1,4 +1,8 @@
 #include "SuppleSWO_parallel.hpp"
+#ifndef BEFTS_MODE
+#include "../ObliviousPrimitives.hpp"
+#include "../utils.hpp"
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -6,6 +10,10 @@
 #include <memory>
 #include <new>
 #include <utility>
+
+namespace swo_parallel
+{
+using namespace detail;
 
 namespace
 {
@@ -402,7 +410,7 @@ size_t ControlNumMemoized(const std::vector<FrontierNode> &F,
     }
   }
 
-  const std::vector<FrontierNode> V = NEXTNODES(F, k);
+  const std::vector<FrontierNode> V = NextNodes(F, k);
   const std::vector<FrontierNode> empty_frontier;
   size_t L = 0;
 
@@ -462,7 +470,7 @@ size_t ControlNumReadOnly(const std::vector<FrontierNode> &F,
     }
   }
 
-  const std::vector<FrontierNode> V = NEXTNODES(F, k);
+  const std::vector<FrontierNode> V = NextNodes(F, k);
   const std::vector<FrontierNode> empty_frontier;
   size_t L = 0;
   for (size_t i = 0; i < V.size(); i++)
@@ -534,7 +542,7 @@ size_t SerialControlWriteFromPointer(const size_t *M,
                                      size_t p)
 {
   std::vector<SwoMarkWorkspace> workspaces(WorkspaceDepth(k));
-  return CONTROLWRITE_WORKSPACE(M,
+  return WriteControlWorkspace(M,
                                 n,
                                 mark_words,
                                 C,
@@ -558,7 +566,7 @@ ControlReadResult SerialControlRead(unsigned char *D,
                                     size_t p)
 {
   std::vector<SwoDataWorkspace> workspaces(WorkspaceDepth(k));
-  return CONTROLREAD_WORKSPACE(D,
+  return ReadControlWorkspace(D,
                                C,
                                F,
                                n,
@@ -585,7 +593,7 @@ ControlReadResult SerialControlReadWithWorkspace(
     size_t p,
     std::vector<SwoDataWorkspace> &workspaces)
 {
-  return CONTROLREAD_WORKSPACE(D,
+  return ReadControlWorkspace(D,
                                C,
                                F,
                                n,
@@ -988,7 +996,7 @@ size_t ControlWriteParallelWorkspace(const size_t *M,
     return SerialControlWriteFromPointer(M, n, mark_words, C, F, m, k, p);
   }
 
-  const std::vector<FrontierNode> V = NEXTNODES(F, k);
+  const std::vector<FrontierNode> V = NextNodes(F, k);
   const std::vector<FrontierNode> empty_frontier;
   const std::vector<ChildLayout> layouts = BuildChildLayouts(V, n, m, p, 0, memo);
 
@@ -1255,7 +1263,7 @@ ControlReadResult ControlReadParallelWorkspace(unsigned char *D,
                              p);
   }
 
-  const std::vector<FrontierNode> V = NEXTNODES(F, k);
+  const std::vector<FrontierNode> V = NextNodes(F, k);
   const std::vector<FrontierNode> empty_frontier;
   const std::vector<ChildLayout> layouts = BuildChildLayouts(V, n, m, p, 0, memo);
 
@@ -1640,7 +1648,7 @@ std::vector<uint8_t> CONTROLBITS_PARALLEL(const std::vector<size_t> &M,
                                           size_t k,
                                           size_t nthreads)
 {
-  const size_t L = CONTROLNUM(F, n, m, k);
+  const size_t L = CountControlBits(F, n, m, k);
   size_t rounded_bits = 0;
   if (AddOverflowSizeT(L, 7, &rounded_bits))
   {
@@ -1846,19 +1854,21 @@ std::vector<unsigned char> OMBSUBSAMPLE_PARALLEL(const unsigned char *D,
     m = n;
   }
 
-  std::vector<size_t> M = MARKMATRIX(n, m, k);
+  std::vector<size_t> M = MarkMembership(n, m, k);
 
   std::vector<FrontierNode> F;
   size_t mk = 0;
   const bool overflow = MulOverflowSizeT(m, k, &mk);
   if (overflow || mk > n)
   {
-    F = FRONTIER(0, k, n, m);
+    F = BuildFrontier(0, k, n, m);
   }
 
   std::vector<uint8_t> C = CONTROLBITS_PARALLEL(M, F, n, m, k, nthreads);
   return RECSAMPLE_PARALLEL(D, C, F, n, m, k, block_size, nthreads);
 }
+
+} // namespace swo_parallel
 
 extern "C" void DecSuppleSWO_parallel(unsigned char *encrypted_buffer,
                                       size_t N,
@@ -1869,6 +1879,8 @@ extern "C" void DecSuppleSWO_parallel(unsigned char *encrypted_buffer,
                                       enc_ret *ret,
                                       size_t nthreads)
 {
+  using namespace swo_parallel;
+  using namespace swo_parallel::detail;
   unsigned char *decrypted_buffer = NULL;
   const size_t decrypted_block_size =
       decryptBuffer(encrypted_buffer, static_cast<uint64_t>(N),
@@ -1939,7 +1951,7 @@ extern "C" void DecSuppleSWO_parallel(unsigned char *encrypted_buffer,
   const bool frontier_overflow = MulOverflowSizeT(M, K, &mk);
   if (frontier_overflow || mk > N)
   {
-    F = FRONTIER(0, K, N, M);
+    F = BuildFrontier(0, K, N, M);
   }
 
   std::vector<uint8_t> C = CONTROLBITS_PARALLEL(M_matrix, F, N, M, K, nthreads);

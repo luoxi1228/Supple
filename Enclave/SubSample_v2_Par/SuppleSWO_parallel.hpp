@@ -2,8 +2,17 @@
 #define __SUBSAMPLE_V2_SUPPLE_SWO_PARALLEL_HPP__
 
 #ifndef BEFTS_MODE
-  #include "SuppleSWO.hpp"
+  #include <cstddef>
+  #include <cstdint>
+  #include <vector>
+  #include "../../Globals.hpp"
 #endif
+
+#include "helper.hpp"
+
+namespace swo_parallel {
+using detail::FrontierNode;
+using detail::ControlReadResult;
 
 std::vector<uint8_t> CONTROLBITS_PARALLEL(const std::vector<size_t> &M,
                                           const std::vector<FrontierNode> &F,
@@ -47,6 +56,8 @@ std::vector<unsigned char> OMBSUBSAMPLE_PARALLEL(const unsigned char *D,
                                                 size_t k,
                                                 size_t block_size,
                                                 size_t nthreads);
+
+} // namespace swo_parallel
 
 extern "C" void DecSuppleSWO_parallel(unsigned char *encrypted_buffer,
                                       size_t N,
