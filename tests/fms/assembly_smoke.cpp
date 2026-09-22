@@ -1,0 +1,57 @@
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <vector>
+
+#include "../../Enclave/SubSample_v2/FMS/FMS.hpp"
+
+thread_local uint64_t OSWAP_COUNTER = 0;
+
+using namespace fms;
+
+static uint32_t ReadId(const std::vector<unsigned char> &data)
+{
+  assert(data.size() >= sizeof(uint32_t));
+  uint32_t id = 0;
+  std::memcpy(&id, data.data(), sizeof(id));
+  return id;
+}
+
+static void Check(size_t width,
+                  uint8_t first_tag,
+                  uint8_t second_tag,
+                  uint32_t expected_left,
+                  uint32_t expected_right)
+{
+  std::vector<unsigned char> data(2 * width);
+  for (size_t byte = 0; byte < width; ++byte)
+  {
+    data[byte] = static_cast<unsigned char>(17 + byte);
+    data[width + byte] = static_cast<unsigned char>(91 + byte);
+  }
+  const uint32_t first = 0;
+  const uint32_t second = 1;
+  std::memcpy(data.data(), &first, sizeof(first));
+  std::memcpy(data.data() + width, &second, sizeof(second));
+
+  const FMSDataResult output = FMSCompact(
+      data.data(), {first_tag, second_tag}, 2, 1, 1, width);
+  assert(ReadId(output.left) == expected_left);
+  assert(ReadId(output.right) == expected_right);
+  const unsigned char *expected_left_record = data.data() + expected_left * width;
+  const unsigned char *expected_right_record = data.data() + expected_right * width;
+  assert(std::memcmp(output.left.data(), expected_left_record, width) == 0);
+  assert(std::memcmp(output.right.data(), expected_right_record, width) == 0);
+}
+
+int main()
+{
+  const size_t widths[] = {4, 7, 8, 12, 16, 24, 32, 40, 64};
+  for (size_t width : widths)
+  {
+    Check(width, FMS_TAG_LEFT, FMS_TAG_RIGHT, 0, 1);
+    Check(width, FMS_TAG_RIGHT, FMS_TAG_LEFT, 1, 0);
+    Check(width, FMS_TAG_BOTH, FMS_TAG_ZERO, 0, 0);
+    Check(width, FMS_TAG_ZERO, FMS_TAG_BOTH, 1, 1);
+  }
+}

@@ -16,13 +16,11 @@ BINARY_FIELDS = [
     "fork_ratio",
     "repeats",
     "control_words",
-    "fms_control_bits_us",
-    "fms_gates",
-    "two_compact_gates",
-    "fms_apply_us",
-    "two_compact_us",
-    "fms_ns_per_item",
-    "two_compact_ns_per_item",
+    "fms_control_us",
+    "fmscompact_us",
+    "ocompact_us",
+    "fmscompact_ns_per_item",
+    "ocompact_ns_per_item",
     "speedup",
     "correct",
 ]
@@ -36,13 +34,11 @@ CSV_FIELDS = [
     "warmups",
     "seed",
     "control_words",
-    "fms_control_bits_us",
-    "fms_gates",
-    "two_compact_gates",
-    "fms_apply_us",
-    "two_compact_us",
-    "fms_ns_per_item",
-    "two_compact_ns_per_item",
+    "fms_control_us",
+    "fmscompact_us",
+    "ocompact_us",
+    "fmscompact_ns_per_item",
+    "ocompact_ns_per_item",
     "speedup",
     "correct",
 ]
@@ -70,19 +66,19 @@ def parse_csv_values(raw: str, cast: Callable[[str], T], name: str) -> List[T]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Compare one online FMSApply with two complete TightCompact_v2 "
-            "operations inside the Supple SGX enclave"
+            "Compare one online FMSCompact with one OCompact operation "
+            "inside the Supple SGX enclave"
         )
     )
     parser.add_argument(
         "--binary",
-        default="Application/ofork_vs_compact",
+        default="Application/fmscompact_vs_ocompact",
         help="benchmark executable relative to the project root",
     )
     parser.add_argument(
         "--n",
         default="262144",
-        help="comma-separated power-of-two input sizes",
+        help="comma-separated input sizes (each must be at least 2)",
     )
     parser.add_argument(
         "--block-sizes",
@@ -102,7 +98,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=20260903)
     parser.add_argument(
         "--output",
-        default="RESULTS/ofork_vs_compact.csv",
+        default="RESULTS/fmscompact_vs_ocompact.csv",
         help="CSV output path relative to the project root",
     )
     parser.add_argument(
@@ -111,10 +107,6 @@ def parse_args() -> argparse.Namespace:
         help="run make before executing the benchmark",
     )
     return parser.parse_args()
-
-
-def is_power_of_two(value: int) -> bool:
-    return value >= 2 and (value & (value - 1)) == 0
 
 
 def supported_block_size(block_size: int) -> bool:
@@ -162,8 +154,8 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    if any(not is_power_of_two(value) for value in n_values):
-        print("every --n value must be a power of two >= 2", file=sys.stderr)
+    if any(value < 2 for value in n_values):
+        print("every --n value must be >= 2", file=sys.stderr)
         return 2
     if any(not supported_block_size(value) for value in block_sizes):
         print(
@@ -247,13 +239,13 @@ def main() -> int:
 
                 print(
                     "  offline generation: "
-                    f"FMSControlBits="
-                    f"{float(result['fms_control_bits_us']):.3f} us"
+                    f"FMSControl="
+                    f"{float(result['fms_control_us']):.3f} us"
                 )
                 print(
                     "  online median: "
-                    f"FMSApply={float(result['fms_apply_us']):.3f} us, "
-                    f"2xCompact={float(result['two_compact_us']):.3f} us, "
+                    f"FMSCompact={float(result['fmscompact_us']):.3f} us, "
+                    f"OCompact={float(result['ocompact_us']):.3f} us, "
                     f"speedup={float(result['speedup']):.3f}x"
                 )
 

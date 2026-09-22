@@ -1,7 +1,7 @@
 
 
 #include "Untrusted.h"
-#include "OFork.hpp"
+#include "FMSCompact.hpp"
 
 struct timespec start, stop;
 double elapsed;
@@ -533,23 +533,27 @@ double MeasureObliviousPrimitive(unsigned char *buf,
   return elapsed_us;
 }
 
-int FMSPrepare(const uint8_t *routing_tags,
-               size_t n,
-               size_t *control_words,
-               double *control_bits_us) {
+int FMSCompactPrepare(const uint8_t *routing_tags,
+                      size_t n,
+                      size_t n_left,
+                      size_t n_right,
+                      size_t *control_words,
+                      double *control_us) {
   if (routing_tags == NULL || control_words == NULL ||
-      control_bits_us == NULL) {
+      control_us == NULL) {
     return -1;
   }
 
   int result = -1;
-  sgx_status_t status = ::FMSPrepare(
+  sgx_status_t status = ::FMSCompactPrepare(
       global_eid,
       &result,
       const_cast<uint8_t *>(routing_tags),
       n,
+      n_left,
+      n_right,
       control_words,
-      control_bits_us);
+      control_us);
   if (status != SGX_SUCCESS) {
     print_error_message(status);
     return -1;
@@ -557,11 +561,11 @@ int FMSPrepare(const uint8_t *routing_tags,
   return result;
 }
 
-double FMSApplyOnline(unsigned char *buffer,
-                      size_t n,
-                      size_t block_size) {
+double FMSCompactOnline(unsigned char *buffer,
+                        size_t n,
+                        size_t block_size) {
   double elapsed_us = -1.0;
-  sgx_status_t status = ::FMSApplyOnline(
+  sgx_status_t status = ::FMSCompactOnline(
       global_eid, &elapsed_us, buffer, n, block_size);
   if (status != SGX_SUCCESS) {
     print_error_message(status);
@@ -570,16 +574,14 @@ double FMSApplyOnline(unsigned char *buffer,
   return elapsed_us;
 }
 
-double TwoCompactOnline(unsigned char *left_buffer,
-                        unsigned char *right_buffer,
-                        size_t n,
-                        size_t block_size) {
+double OCompactOnline(unsigned char *buffer,
+                      size_t n,
+                      size_t block_size) {
   double elapsed_us = -1.0;
-  sgx_status_t status = ::TwoCompactOnline(
+  sgx_status_t status = ::OCompactOnline(
       global_eid,
       &elapsed_us,
-      left_buffer,
-      right_buffer,
+      buffer,
       n,
       block_size);
   if (status != SGX_SUCCESS) {
@@ -589,8 +591,8 @@ double TwoCompactOnline(unsigned char *left_buffer,
   return elapsed_us;
 }
 
-void FMSRelease(void) {
-  sgx_status_t status = ::FMSRelease(global_eid);
+void FMSCompactRelease(void) {
+  sgx_status_t status = ::FMSCompactRelease(global_eid);
   if (status != SGX_SUCCESS) {
     print_error_message(status);
   }

@@ -9,7 +9,7 @@
 #include <random>
 #include <vector>
 
-#include "../Untrusted/OFork.hpp"
+#include "../Untrusted/FMSCompact.hpp"
 #include "../Untrusted/OLib.hpp"
 
 namespace
@@ -17,16 +17,11 @@ namespace
 
 enum RoutingTag : uint8_t
 {
-  TAG_NONE = 0,
+  TAG_ZERO = 0,
   TAG_RIGHT = 1,
   TAG_LEFT = 2,
   TAG_BOTH = 3
 };
-
-bool IsPowerOfTwo(size_t value)
-{
-  return value >= 2 && (value & (value - 1)) == 0;
-}
 
 bool SupportedBlockSize(size_t block_size)
 {
@@ -135,21 +130,22 @@ size_t ReadIdentifier(const unsigned char *block, size_t block_size)
   return static_cast<size_t>(identifier);
 }
 
-std::vector<uint8_t> MakeBalancedTags(size_t n,
-                                      double requested_fork_ratio,
-                                      uint64_t seed,
-                                      size_t *fork_count)
+std::vector<uint8_t> MakeRoutingTags(size_t n,
+                                     size_t n_left,
+                                     size_t n_right,
+                                     double requested_fork_ratio,
+                                     uint64_t seed,
+                                     size_t *fork_count)
 {
-  const size_t half = n / 2;
   size_t overlap = static_cast<size_t>(
       std::floor(requested_fork_ratio * static_cast<double>(n) + 0.5));
-  overlap = std::min(overlap, half);
+  overlap = std::min(overlap, std::min(n_left, n_right));
 
   std::vector<uint8_t> tags;
   tags.reserve(n);
-  tags.insert(tags.end(), overlap, TAG_NONE);
-  tags.insert(tags.end(), half - overlap, TAG_LEFT);
-  tags.insert(tags.end(), half - overlap, TAG_RIGHT);
+  tags.insert(tags.end(), overlap, TAG_ZERO);
+  tags.insert(tags.end(), n_left - overlap, TAG_LEFT);
+  tags.insert(tags.end(), n_right - overlap, TAG_RIGHT);
   tags.insert(tags.end(), overlap, TAG_BOTH);
 
   std::mt19937_64 generator(seed);
@@ -192,58 +188,46 @@ bool VerifySide(const unsigned char *blocks,
 bool CheckCorrectness(const std::vector<unsigned char> &initial,
                       const std::vector<uint8_t> &tags,
                       size_t n,
+                      size_t n_left,
+                      size_t n_right,
                       size_t block_size)
 {
-  const size_t half = n / 2;
   std::vector<unsigned char> fms = initial;
-  std::vector<unsigned char> compact_left = initial;
-  std::vector<unsigned char> compact_right = initial;
+  std::vector<unsigned char> compact = initial;
 
-  if (FMSApplyOnline(fms.data(), n, block_size) < 0.0 ||
-      TwoCompactOnline(compact_left.data(),
-                       compact_right.data(),
-                       n,
-                       block_size) < 0.0)
+  if (FMSCompactOnline(fms.data(), n, block_size) < 0.0 ||
+      OCompactOnline(compact.data(), n, block_size) < 0.0)
   {
     return false;
   }
 
-  return VerifySide(fms.data(), 0, half, block_size, tags, TAG_LEFT) &&
-         VerifySide(fms.data(), half, half, block_size, tags, TAG_RIGHT) &&
-         VerifySide(compact_left.data(),
+  return VerifySide(fms.data(), 0, n_left, block_size, tags, TAG_LEFT) &&
+         VerifySide(fms.data(), n_left, n_right, block_size, tags, TAG_RIGHT) &&
+         VerifySide(compact.data(),
                     0,
-                    half,
+                    n_left,
                     block_size,
                     tags,
-                    TAG_LEFT) &&
-         VerifySide(compact_right.data(),
-                    0,
-                    half,
-                    block_size,
-                    tags,
-                    TAG_RIGHT);
+                    TAG_LEFT);
 }
 
-double RunFMS(std::vector<unsigned char> *work,
-              const std::vector<unsigned char> &initial,
-              size_t n,
-              size_t block_size)
-{
-  // Input restoration is deliberately outside the enclave-side timer.
-  std::copy(initial.begin(), initial.end(), work->begin());
-  return FMSApplyOnline(work->data(), n, block_size);
-}
-
-double RunTwoCompact(std::vector<unsigned char> *left,
-                     std::vector<unsigned char> *right,
+double RunFMSCompact(std::vector<unsigned char> *work,
                      const std::vector<unsigned char> &initial,
                      size_t n,
                      size_t block_size)
 {
-  // Both baseline inputs are prepared before its enclave-side timer starts.
-  std::copy(initial.begin(), initial.end(), left->begin());
-  std::copy(initial.begin(), initial.end(), right->begin());
-  return TwoCompactOnline(left->data(), right->data(), n, block_size);
+  // Input restoration is deliberately outside the enclave-side timer.
+  std::copy(initial.begin(), initial.end(), work->begin());
+  return FMSCompactOnline(work->data(), n, block_size);
+}
+
+double RunOCompact(std::vector<unsigned char> *work,
+                   const std::vector<unsigned char> &initial,
+                   size_t n,
+                   size_t block_size)
+{
+  std::copy(initial.begin(), initial.end(), work->begin());
+  return OCompactOnline(work->data(), n, block_size);
 }
 
 } // namespace
@@ -272,7 +256,7 @@ int main(int argc, char **argv)
       !ParseSize(argv[4], &repeats) ||
       !ParseSize(argv[5], &warmups) ||
       !ParseSize(argv[6], &seed_value) ||
-      !IsPowerOfTwo(n) ||
+      n < 2 ||
       !SupportedBlockSize(block_size) ||
       repeats == 0 ||
       warmups > std::numeric_limits<size_t>::max() - repeats ||
@@ -282,7 +266,7 @@ int main(int argc, char **argv)
   {
     std::fprintf(
         stderr,
-        "Invalid arguments: n must be a power of two >= 2; fork_ratio must "
+        "Invalid arguments: n must be >= 2; fork_ratio must "
         "be in [0,0.5]; repeats must be positive; supported block sizes are "
         "4, 8, 12, 16*n, and 8+16*n (n>=1).\n");
     return 1;
@@ -295,9 +279,13 @@ int main(int argc, char **argv)
     return 1;
   }
 
+  const size_t n_left = n / 2 + n % 2;
+  const size_t n_right = n / 2;
   size_t fork_count = 0;
-  std::vector<uint8_t> tags = MakeBalancedTags(
+  std::vector<uint8_t> tags = MakeRoutingTags(
       n,
+      n_left,
+      n_right,
       fork_ratio,
       static_cast<uint64_t>(seed_value),
       &fork_count);
@@ -306,25 +294,26 @@ int main(int argc, char **argv)
 
   std::vector<unsigned char> initial(bytes);
   std::vector<unsigned char> fms_work(bytes);
-  std::vector<unsigned char> compact_left(bytes);
-  std::vector<unsigned char> compact_right(bytes);
+  std::vector<unsigned char> compact_work(bytes);
   InitializeInput(&initial, n, block_size);
 
   OLib_initialize();
 
   size_t control_words = 0;
-  double control_bits_us = -1.0;
-  const int prepare_result = FMSPrepare(tags.data(),
-                                        n,
-                                        &control_words,
-                                        &control_bits_us);
+  double control_us = -1.0;
+  const int prepare_result = FMSCompactPrepare(tags.data(),
+                                               n,
+                                               n_left,
+                                               n_right,
+                                               &control_words,
+                                               &control_us);
   if (prepare_result != 0)
   {
-    std::fprintf(stderr, "FMSPrepare failed with code %d.\n", prepare_result);
+    std::fprintf(stderr, "FMSCompactPrepare failed with code %d.\n", prepare_result);
     return 2;
   }
 
-  if (!CheckCorrectness(initial, tags, n, block_size))
+  if (!CheckCorrectness(initial, tags, n, n_left, n_right, block_size))
   {
     std::fprintf(stderr,
                  "Correctness check failed for n=%zu, block_size=%zu, "
@@ -332,86 +321,72 @@ int main(int argc, char **argv)
                  n,
                  block_size,
                  actual_fork_ratio);
-    FMSRelease();
+    FMSCompactRelease();
     return 3;
   }
 
-  std::vector<double> fms_samples;
+  std::vector<double> fmscompact_samples;
   std::vector<double> compact_samples;
-  fms_samples.reserve(repeats);
+  fmscompact_samples.reserve(repeats);
   compact_samples.reserve(repeats);
 
   const size_t rounds = warmups + repeats;
   for (size_t round = 0; round < rounds; ++round)
   {
-    double fms_time = -1.0;
+    double fmscompact_time = -1.0;
     double compact_time = -1.0;
 
     // Alternate order to reduce cache, frequency, and temperature bias.
     if ((round & 1U) == 0U)
     {
-      fms_time = RunFMS(&fms_work, initial, n, block_size);
-      compact_time = RunTwoCompact(&compact_left,
-                                   &compact_right,
-                                   initial,
-                                   n,
-                                   block_size);
+      fmscompact_time = RunFMSCompact(&fms_work, initial, n, block_size);
+      compact_time = RunOCompact(&compact_work, initial, n, block_size);
     }
     else
     {
-      compact_time = RunTwoCompact(&compact_left,
-                                   &compact_right,
-                                   initial,
-                                   n,
-                                   block_size);
-      fms_time = RunFMS(&fms_work, initial, n, block_size);
+      compact_time = RunOCompact(&compact_work, initial, n, block_size);
+      fmscompact_time = RunFMSCompact(&fms_work, initial, n, block_size);
     }
 
-    if (fms_time < 0.0 || compact_time < 0.0)
+    if (fmscompact_time < 0.0 || compact_time < 0.0)
     {
       std::fprintf(stderr, "An online measurement ECALL failed.\n");
-      FMSRelease();
+      FMSCompactRelease();
       return 2;
     }
 
     if (round >= warmups)
     {
-      fms_samples.push_back(fms_time);
+      fmscompact_samples.push_back(fmscompact_time);
       compact_samples.push_back(compact_time);
     }
   }
 
-  const double fms_us = Median(fms_samples);
-  const double compact_us = Median(compact_samples);
-  const double fms_ns_per_item = fms_us * 1000.0 / static_cast<double>(n);
-  const double compact_ns_per_item =
-      compact_us * 1000.0 / static_cast<double>(n);
-  const double speedup = fms_us > 0.0
-                             ? compact_us / fms_us
+  const double fmscompact_us = Median(fmscompact_samples);
+  const double ocompact_us = Median(compact_samples);
+  const double fmscompact_ns_per_item =
+      fmscompact_us * 1000.0 / static_cast<double>(n);
+  const double ocompact_ns_per_item =
+      ocompact_us * 1000.0 / static_cast<double>(n);
+  const double speedup = fmscompact_us > 0.0
+                             ? ocompact_us / fmscompact_us
                              : std::numeric_limits<double>::infinity();
-  const size_t fms_gates = control_words;
-  const size_t two_compact_gates =
-      control_words <= std::numeric_limits<size_t>::max() / 2
-          ? control_words * 2
-          : 0;
 
   std::printf(
-      "RESULT,%zu,%zu,%.9f,%zu,%zu,%.9f,%zu,%zu,"
+      "RESULT,%zu,%zu,%.9f,%zu,%zu,%.9f,"
       "%.9f,%.9f,%.9f,%.9f,%.9f,1\n",
       n,
       block_size,
       actual_fork_ratio,
       repeats,
       control_words,
-      control_bits_us,
-      fms_gates,
-      two_compact_gates,
-      fms_us,
-      compact_us,
-      fms_ns_per_item,
-      compact_ns_per_item,
+      control_us,
+      fmscompact_us,
+      ocompact_us,
+      fmscompact_ns_per_item,
+      ocompact_ns_per_item,
       speedup);
 
-  FMSRelease();
+  FMSCompactRelease();
   return 0;
 }

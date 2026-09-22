@@ -1,22 +1,23 @@
 enclave {
     trusted {
-        public int FMSPrepare(
+        public int FMSCompactPrepare(
             [in, size=n] uint8_t *routing_tags,
             size_t n,
+            size_t n_left,
+            size_t n_right,
             [out] size_t *control_words,
-            [out] double *control_bits_us);
+            [out] double *control_us);
 
-        public double FMSApplyOnline(
+        public double FMSCompactOnline(
             [user_check] unsigned char *buffer,
             size_t n,
             size_t block_size);
 
-        public double TwoCompactOnline(
-            [user_check] unsigned char *left_buffer,
-            [user_check] unsigned char *right_buffer,
+        public double OCompactOnline(
+            [user_check] unsigned char *buffer,
             size_t n,
             size_t block_size);
 
-        public void FMSRelease(void);
+        public void FMSCompactRelease(void);
     };
 };
