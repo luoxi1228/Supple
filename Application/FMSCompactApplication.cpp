@@ -79,15 +79,14 @@ bool BufferBytes(size_t n, size_t block_size, size_t *bytes)
   return true;
 }
 
-double Median(std::vector<double> values)
+double Mean(const std::vector<double> &values)
 {
-  std::sort(values.begin(), values.end());
-  const size_t middle = values.size() / 2;
-  if ((values.size() & 1U) != 0U)
+  double total = 0.0;
+  for (double value : values)
   {
-    return values[middle];
+    total += value;
   }
-  return (values[middle - 1] + values[middle]) / 2.0;
+  return total / static_cast<double>(values.size());
 }
 
 void InitializeInput(std::vector<unsigned char> *buffer,
@@ -297,7 +296,9 @@ int main(int argc, char **argv)
   std::vector<unsigned char> compact_work(bytes);
   InitializeInput(&initial, n, block_size);
 
-  OLib_initialize();
+  if (!OLib_initialize()) {
+    return 2;
+  }
 
   size_t control_words = 0;
   double control_us = -1.0;
@@ -362,29 +363,24 @@ int main(int argc, char **argv)
     }
   }
 
-  const double fmscompact_us = Median(fmscompact_samples);
-  const double ocompact_us = Median(compact_samples);
-  const double fmscompact_ns_per_item =
-      fmscompact_us * 1000.0 / static_cast<double>(n);
-  const double ocompact_ns_per_item =
-      ocompact_us * 1000.0 / static_cast<double>(n);
-  const double speedup = fmscompact_us > 0.0
-                             ? ocompact_us / fmscompact_us
+  const double fms_control_ms = control_us / 1000.0;
+  const double fmscompact_ms = Mean(fmscompact_samples) / 1000.0;
+  const double ocompact_ms = Mean(compact_samples) / 1000.0;
+  const double speedup = fmscompact_ms > 0.0
+                             ? ocompact_ms / fmscompact_ms
                              : std::numeric_limits<double>::infinity();
 
   std::printf(
       "RESULT,%zu,%zu,%.9f,%zu,%zu,%.9f,"
-      "%.9f,%.9f,%.9f,%.9f,%.9f,1\n",
+      "%.9f,%.9f,%.9f,1\n",
       n,
       block_size,
       actual_fork_ratio,
       repeats,
       control_words,
-      control_us,
-      fmscompact_us,
-      ocompact_us,
-      fmscompact_ns_per_item,
-      ocompact_ns_per_item,
+      fms_control_ms,
+      fmscompact_ms,
+      ocompact_ms,
       speedup);
 
   FMSCompactRelease();

@@ -109,6 +109,55 @@ static void Verify(const std::vector<uint8_t> &tags,
 
   if (check_compact)
   {
+    std::vector<unsigned char> in_place = data;
+    const std::vector<FMSOutputSwap> output_swaps =
+        FMSOutputSwaps(n, n_left, n_right);
+    FMSApplyInPlace(in_place.data(), controls, output_swaps,
+                    n, n_left, n_right, width);
+    assert(std::equal(applied.left.begin(), applied.left.end(),
+                      in_place.begin()));
+    assert(std::equal(applied.right.begin(), applied.right.end(),
+                      in_place.begin() + applied.left.size()));
+
+    std::vector<unsigned char> split_timing = data;
+    FMSApplyInPlace(split_timing.data(), controls, output_swaps,
+                    n, n_left, n_right, width, false);
+    FMSApplyOutputSwapsInPlace(
+        split_timing.data(), n, width, output_swaps);
+    assert(split_timing == in_place);
+
+    std::vector<unsigned char> prepared = data;
+    FMSApplyPreparedInPlace(prepared.data(), controls, output_swaps,
+                            n, n_left, n_right, width, false);
+    FMSApplyOutputSwapsInPlace(prepared.data(), n, width, output_swaps);
+    assert(prepared == in_place);
+
+    if (n >= 2 && (n & (n - 1)) == 0 && n_left == n / 2)
+    {
+      std::vector<unsigned char> level_ordered = data;
+      const std::vector<uint8_t> level_controls =
+          FMSLevelOrderControls(controls, n, n_left, n_right);
+      FMSApplyLevelOrderedInPlace(level_ordered.data(), level_controls,
+                                  output_swaps, n, n_left, n_right, width);
+      assert(level_ordered == in_place);
+
+      std::vector<unsigned char> level_split_timing = data;
+      FMSApplyLevelOrderedInPlace(level_split_timing.data(), level_controls,
+                                  output_swaps, n, n_left, n_right, width,
+                                  false);
+      FMSApplyOutputSwapsInPlace(
+          level_split_timing.data(), n, width, output_swaps);
+      assert(level_split_timing == level_ordered);
+
+      std::vector<unsigned char> prepared_level = data;
+      FMSApplyPreparedLevelOrderedInPlace(
+          prepared_level.data(), level_controls, output_swaps,
+          n, n_left, n_right, width, false);
+      FMSApplyOutputSwapsInPlace(
+          prepared_level.data(), n, width, output_swaps);
+      assert(prepared_level == level_ordered);
+    }
+
     const FMSDataResult compacted = FMSCompact(
         data.data(), tags, n, n_left, n_right, width);
     assert(compacted.left == applied.left && compacted.right == applied.right);

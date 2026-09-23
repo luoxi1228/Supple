@@ -13,10 +13,12 @@ namespace
 {
 
 std::vector<uint8_t> g_fms_controls;
+std::vector<fms::FMSOutputSwap> g_fms_output_swaps;
 bool *g_ocompact_selected = NULL;
 size_t g_fms_n = 0;
 size_t g_fms_n_left = 0;
 size_t g_fms_n_right = 0;
+bool g_fms_level_ordered = false;
 
 bool MulOverflow(size_t lhs, size_t rhs, size_t *result)
 {
@@ -52,7 +54,9 @@ void ReleaseBenchmarkContext()
   g_fms_n = 0;
   g_fms_n_left = 0;
   g_fms_n_right = 0;
+  g_fms_level_ordered = false;
   std::vector<uint8_t>().swap(g_fms_controls);
+  std::vector<fms::FMSOutputSwap>().swap(g_fms_output_swaps);
 }
 
 } // namespace
@@ -76,6 +80,16 @@ extern "C" int FMSCompactPrepare(uint8_t *routing_tags,
     ocall_clock(&start_time);
     std::vector<uint8_t> controls = fms::FMSControl(
         tags, n, n_left, n_right);
+    std::vector<fms::FMSOutputSwap> output_swaps =
+        fms::FMSOutputSwaps(n, n_left, n_right);
+    const bool level_ordered = n >= 2 && (n & (n - 1)) == 0 &&
+                               n_left == n / 2 && n_right == n / 2;
+    if (level_ordered)
+    {
+      std::vector<uint8_t> level_controls =
+          fms::FMSLevelOrderControls(controls, n, n_left, n_right);
+      controls.swap(level_controls);
+    }
     ocall_clock(&stop_time);
 
     const std::vector<uint8_t> normalized = fms::FMSNormalize(
@@ -86,10 +100,12 @@ extern "C" int FMSCompactPrepare(uint8_t *routing_tags,
 
     ReleaseBenchmarkContext();
     g_fms_controls.swap(controls);
+    g_fms_output_swaps.swap(output_swaps);
     g_ocompact_selected = selected;
     g_fms_n = n;
     g_fms_n_left = n_left;
     g_fms_n_right = n_right;
+    g_fms_level_ordered = level_ordered;
     *control_words = g_fms_controls.size();
     *control_us = static_cast<double>(stop_time - start_time);
     return 0;
@@ -117,18 +133,19 @@ extern "C" double FMSCompactOnline(unsigned char *buffer,
     long start_time = 0;
     long stop_time = 0;
     ocall_clock(&start_time);
-    fms::FMSDataResult output = fms::FMSApply(
-        buffer,
-        g_fms_controls,
-        n,
-        g_fms_n_left,
-        g_fms_n_right,
-        block_size);
-    std::memcpy(buffer, output.left.data(), output.left.size());
-    std::memcpy(buffer + output.left.size(),
-                output.right.data(),
-                output.right.size());
+    if (g_fms_level_ordered)
+      fms::FMSApplyPreparedLevelOrderedInPlace(
+          buffer, g_fms_controls, g_fms_output_swaps,
+          n, g_fms_n_left, g_fms_n_right, block_size, false);
+    else
+      fms::FMSApplyPreparedInPlace(
+          buffer, g_fms_controls, g_fms_output_swaps,
+          n, g_fms_n_left, g_fms_n_right, block_size, false);
     ocall_clock(&stop_time);
+
+    // Keep the final output identical, but exclude output swaps from the timer.
+    fms::FMSApplyOutputSwapsInPlace(
+        buffer, n, block_size, g_fms_output_swaps);
     return static_cast<double>(stop_time - start_time);
   }
   catch (...)

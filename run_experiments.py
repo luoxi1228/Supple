@@ -51,8 +51,8 @@ MODE_INFO = {
   3: {"name": "SubSample", "needs_k": False, "detailed": False, "fixed_k": True},
   4: {"name": "SubSampleMultiSlice", "needs_k": True, "detailed": True, "fixed_k": False},
   5: {"name": "SubSampleMulti_opt", "needs_k": True, "detailed": True, "fixed_k": False},
-  6: {"name": "SuppleSWO", "needs_k": True, "detailed": True, "fixed_k": False},
-  7: {"name": "SuppleSWO_parallel", "needs_k": True, "detailed": True, "fixed_k": False},
+  6: {"name": "Supple", "needs_k": True, "detailed": True, "fixed_k": False},
+  7: {"name": "Supple_parallel", "needs_k": True, "detailed": True, "fixed_k": False},
 }
 
 
@@ -90,10 +90,13 @@ def parse_args():
   parser.add_argument("--k-select", type=int, choices=[1, 2], default=DEFAULT_K_SELECT,
                       help="Modes 4/5/6/7 K selection: 1 => k=1/p, 2 => use --k list")
   parser.add_argument("--block-sizes", default=",".join(map(str, DEFAULT_BLOCK_SIZE)), help="Comma-separated block sizes")
-  parser.add_argument("--repeat", type=int, default=DEFAULT_REPEAT, help="Repeat count")
+  parser.add_argument(
+    "--repeat", type=int, default=DEFAULT_REPEAT,
+    help="Number of measured rounds averaged after one warm-up round",
+  )
   parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Thread count for mode 7")
   parser.add_argument("--results-folder", default=DEFAULT_RESULTS_FOLDER, help="Results folder path")
-  parser.add_argument("--overwrite", action="store_true", help="Overwrite each mode log on first write")
+  parser.add_argument("--overwrite", action="store_true", help="Overwrite each mode CSV on first write")
   return parser.parse_args()
 
 
@@ -309,7 +312,7 @@ def make_result(mode, k_value, parsed, heap_mb):
   return (k_value, ecall_time, ptime, oswaps, heap_mb)
 
 
-def format_log_line(mode, block_size, sample_prob, n, result):
+def format_csv_line(mode, block_size, sample_prob, n, result):
   if MODE_INFO[mode]["detailed"]:
     k_out, ecall_time, ptime, gen_perm, apply_perm, oswaps, heap_mb = result
     values = [block_size, sample_prob, n, k_out, ecall_time, ptime, gen_perm, apply_perm, oswaps, heap_mb]
@@ -332,7 +335,7 @@ def main():
   block_sizes = parse_csv(args.block_sizes, "block-sizes", int)
   repeat = int(args.repeat)
   threads = int(args.threads)
-  initialized_logs = set()
+  initialized_csv_files = set()
 
   if repeat <= 0:
     print("REPEAT must be > 0")
@@ -350,7 +353,7 @@ def main():
 
   for mode in modes:
     mode_name = MODE_INFO[mode]["name"]
-    log_file_name = results_folder / (mode_name + ".lg")
+    csv_file_name = results_folder / (mode_name + ".csv")
 
     for block_size in block_sizes:
       for p_rate in p_values:
@@ -398,11 +401,11 @@ def main():
             print("Out_lines: %s\n" % (parsed,))
             results[(n, k_value)] = make_result(mode, k_value, parsed, heap_mb)
 
-        file_mode = "w" if args.overwrite and mode not in initialized_logs else "a"
-        initialized_logs.add(mode)
-        with open(log_file_name, file_mode) as log_file:
+        file_mode = "w" if args.overwrite and mode not in initialized_csv_files else "a"
+        initialized_csv_files.add(mode)
+        with open(csv_file_name, file_mode) as csv_file:
           for n, k_used in sorted(results.keys(), key=lambda item: (item[0], item[1])):
-            log_file.write(format_log_line(mode, block_size, p_rate, n, results[(n, k_used)]))
+            csv_file.write(format_csv_line(mode, block_size, p_rate, n, results[(n, k_used)]))
 
   return 0
 

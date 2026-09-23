@@ -82,20 +82,21 @@ From the project root:
 - `--block-sizes`: comma-separated block sizes
 - `--repeat`: repeat count per config
 - `--results-folder`: output directory
-- `--overwrite`: overwrite each mode log on first write in current script process
+- `--overwrite`: overwrite each mode CSV on first write in current script process
 
 ### Mode List (Current)
 
 - `1`: PSQF_single
 - `2`: PSQF_SWO
-- `3`: OSBSubsample(SingleSubsampling)
-- `4`: RecSubsample(MultiSubsampling)
-- `5`: OMBSubsample(OptMultiSubsampling)
-- `6`: SuppleSWO
+- `3`: SubSample
+- `4`: SubSampleMultiSlice
+- `5`: SubSampleMulti_opt
+- `6`: Supple
+- `7`: Supple_parallel
 
 ### `k` Selection Behavior
 
-- Modes `4`, `5`, and `6`:
+- Modes `4`, `5`, `6`, and `7`:
     - `k-select=1`: use derived `k = max(1, int(1/p))`
     - `k-select=2`: sweep values from `--k`
 - Mode `2`: always uses `k = max(1, int(1/p))`
@@ -103,18 +104,19 @@ From the project root:
 
 ------------------------------------------------------------------------
 
-# 3. Output Files and Log Format
+# 3. Output Files and CSV Format
 
 Results are written under `--results-folder` (default `RESULTS`).
 
-Each mode is appended to one log file:
+Each mode is appended to one headerless CSV file:
 
-- `<RESULTS_FOLDER>/PSQF_single.lg`
-- `<RESULTS_FOLDER>/PSQF_SWO.lg`
-- `<RESULTS_FOLDER>/SubSample.lg`
-- `<RESULTS_FOLDER>/SubSampleMultiSlice.lg`
-- `<RESULTS_FOLDER>/SubSampleMulti_opt.lg`
-- `<RESULTS_FOLDER>/SuppleSWO.lg`
+- `<RESULTS_FOLDER>/PSQF_single.csv`
+- `<RESULTS_FOLDER>/PSQF_SWO.csv`
+- `<RESULTS_FOLDER>/SubSample.csv`
+- `<RESULTS_FOLDER>/SubSampleMultiSlice.csv`
+- `<RESULTS_FOLDER>/SubSampleMulti_opt.csv`
+- `<RESULTS_FOLDER>/Supple.csv`
+- `<RESULTS_FOLDER>/Supple_parallel.csv`
 
 
 ## 3.1 Common Prefix Columns
@@ -129,7 +131,7 @@ Columns:
 
 `block_size, p, n, k, ecall_time, ptime, oswaps, heap_est_mb`
 
-## 3.3 Mode 4/5/6
+## 3.3 Mode 4/5/6/7
 
 Columns:
 

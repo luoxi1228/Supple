@@ -44,6 +44,34 @@ static void Check(size_t width,
   assert(std::memcmp(output.right.data(), expected_right_record, width) == 0);
 }
 
+static void CheckLevelOrdered(size_t width)
+{
+  const size_t n = 8;
+  const std::vector<uint8_t> tags = {
+      FMS_TAG_LEFT, FMS_TAG_BOTH, FMS_TAG_ZERO, FMS_TAG_RIGHT,
+      FMS_TAG_BOTH, FMS_TAG_ZERO, FMS_TAG_LEFT, FMS_TAG_RIGHT};
+  std::vector<unsigned char> data(n * width);
+  for (size_t i = 0; i < n; ++i)
+  {
+    const uint32_t id = static_cast<uint32_t>(i);
+    std::memcpy(data.data() + i * width, &id, sizeof(id));
+  }
+  const FMSDataResult expected = FMSCompact(
+      data.data(), tags, n, n / 2, n / 2, width);
+  const std::vector<uint8_t> controls = FMSControl(
+      tags, n, n / 2, n / 2);
+  const std::vector<uint8_t> level_controls = FMSLevelOrderControls(
+      controls, n, n / 2, n / 2);
+  const std::vector<FMSOutputSwap> output_swaps = FMSOutputSwaps(
+      n, n / 2, n / 2);
+  FMSApplyLevelOrderedInPlace(data.data(), level_controls, output_swaps,
+                              n, n / 2, n / 2, width);
+  assert(std::memcmp(data.data(), expected.left.data(),
+                     expected.left.size()) == 0);
+  assert(std::memcmp(data.data() + expected.left.size(),
+                     expected.right.data(), expected.right.size()) == 0);
+}
+
 int main()
 {
   const size_t widths[] = {4, 7, 8, 12, 16, 24, 32, 40, 64};
@@ -53,5 +81,6 @@ int main()
     Check(width, FMS_TAG_RIGHT, FMS_TAG_LEFT, 1, 0);
     Check(width, FMS_TAG_BOTH, FMS_TAG_ZERO, 0, 0);
     Check(width, FMS_TAG_ZERO, FMS_TAG_BOTH, 1, 1);
+    CheckLevelOrdered(width);
   }
 }

@@ -6,6 +6,10 @@
 #include <limits>
 #include <stdexcept>
 
+#ifndef BEFTS_MODE
+#include "../../oasm_lib.h"
+#endif
+
 namespace fms
 {
 
@@ -110,117 +114,218 @@ size_t FMSControlWriteImpl(const std::vector<uint8_t> &tags,
                              position);
 }
 
-void CopyRecords(const unsigned char *source,
-                 size_t blocks,
-                 size_t block_size,
-                 std::vector<unsigned char> *destination)
+// The two recursive children occupy the even and odd record lanes. Recurse
+// with a doubled stride instead of materializing either child in a vector.
+size_t FMSApplyStrided(unsigned char *data,
+                       const std::vector<uint8_t> &controls,
+                       size_t n,
+                       size_t n_left,
+                       size_t n_right,
+                       size_t block_size,
+                       size_t stride,
+                       size_t position)
 {
-  size_t bytes = 0;
-  if (destination == NULL || MulOverflowSize(blocks, block_size, &bytes))
-    throw std::length_error("FMS data size overflow");
-  destination->resize(bytes);
-  if (bytes != 0)
-    std::memcpy(destination->data(), source, bytes);
-}
+  if (n_left == 0 || n_right == 0)
+    return position;
 
-void AppendBytes(std::vector<unsigned char> *destination,
-                 const std::vector<unsigned char> &suffix)
-{
-  if (destination->size() >
-      std::numeric_limits<size_t>::max() - suffix.size())
-    throw std::length_error("FMS output size overflow");
-  destination->insert(destination->end(), suffix.begin(), suffix.end());
-}
-
-FMSControlReadResult FMSControlReadImpl(const unsigned char *data,
-                                        const std::vector<uint8_t> &controls,
-                                        size_t n,
-                                        size_t n_left,
-                                        size_t n_right,
-                                        size_t block_size,
-                                        size_t position)
-{
-  FMSControlReadResult result;
-  result.next_pos = position;
-
-  if (n_left == 0)
-  {
-    CopyRecords(data, n, block_size, &result.right);
-    return result;
-  }
-  if (n_right == 0)
-  {
-    CopyRecords(data, n, block_size, &result.left);
-    return result;
-  }
-
+  const size_t byte_stride = stride * block_size;
   if (n == 2)
   {
-    CopyRecords(data, 1, block_size, &result.left);
-    CopyRecords(data + block_size, 1, block_size, &result.right);
-    detail::ApplyOFork(result.left.data(),
-                       result.right.data(),
-                       block_size,
-                       controls[position]);
-    result.next_pos = position + 1;
-    return result;
+    detail::ApplyOFork(data, data + byte_stride, block_size, controls[position]);
+    return position + 1;
   }
-
-  const CapacitySplit split = SplitCapacities(n, n_left, n_right);
-  std::vector<unsigned char> top;
-  std::vector<unsigned char> bottom;
-  size_t top_bytes = 0;
-  size_t bottom_bytes = 0;
-  if (MulOverflowSize(split.n_top, block_size, &top_bytes) ||
-      MulOverflowSize(split.n_bottom, block_size, &bottom_bytes))
-    throw std::length_error("FMS layer workspace size overflow");
-  top.resize(top_bytes);
-  bottom.resize(bottom_bytes);
 
   const size_t gate_count = n / 2;
   for (size_t gate = 0; gate < gate_count; ++gate)
   {
-    unsigned char *top_record = top.data() + gate * block_size;
-    unsigned char *bottom_record = bottom.data() + gate * block_size;
-    std::memcpy(top_record, data + (2 * gate) * block_size, block_size);
-    std::memcpy(bottom_record, data + (2 * gate + 1) * block_size, block_size);
-    detail::ApplyOFork(top_record,
-                       bottom_record,
+    unsigned char *first = data + (2 * gate) * byte_stride;
+    detail::ApplyOFork(first,
+                       first + byte_stride,
                        block_size,
                        controls[position + gate]);
   }
-  if ((n & 1U) != 0)
-  {
-    std::memcpy(top.data() + gate_count * block_size,
-                data + (n - 1) * block_size,
-                block_size);
-  }
   position += gate_count;
 
-  FMSControlReadResult top_result = FMSControlReadImpl(
-      top.data(),
-      controls,
-      split.n_top,
-      split.top_left,
-      split.top_right,
-      block_size,
-      position);
-  FMSControlReadResult bottom_result = FMSControlReadImpl(
-      bottom.data(),
-      controls,
-      split.n_bottom,
-      split.bottom_left,
-      split.bottom_right,
-      block_size,
-      top_result.next_pos);
-
-  result.left.swap(top_result.left);
-  AppendBytes(&result.left, bottom_result.left);
-  result.right.swap(top_result.right);
-  AppendBytes(&result.right, bottom_result.right);
-  result.next_pos = bottom_result.next_pos;
-  return result;
+  const CapacitySplit split = SplitCapacities(n, n_left, n_right);
+  position = FMSApplyStrided(data,
+                             controls,
+                             split.n_top,
+                             split.top_left,
+                             split.top_right,
+                             block_size,
+                             stride * 2,
+                             position);
+  return FMSApplyStrided(data + byte_stride,
+                          controls,
+                          split.n_bottom,
+                          split.bottom_left,
+                          split.bottom_right,
+                          block_size,
+                          stride * 2,
+                          position);
 }
+
+// Build the public permutation from strided lanes to the left/right DFS
+// concatenation order specified by FMSControlRead.
+void BuildOutputDestinations(size_t n,
+                             size_t n_left,
+                             size_t n_right,
+                             size_t base,
+                             size_t stride,
+                             size_t left_base,
+                             size_t right_base,
+                             std::vector<size_t> *destinations)
+{
+  if (n_left == 0 || n_right == 0)
+  {
+    const size_t output_base = n_left == 0 ? right_base : left_base;
+    for (size_t i = 0; i < n; ++i)
+      (*destinations)[base + i * stride] = output_base + i;
+    return;
+  }
+  if (n == 2)
+  {
+    (*destinations)[base] = left_base;
+    (*destinations)[base + stride] = right_base;
+    return;
+  }
+
+  const CapacitySplit split = SplitCapacities(n, n_left, n_right);
+  BuildOutputDestinations(split.n_top,
+                          split.top_left,
+                          split.top_right,
+                          base,
+                          stride * 2,
+                          left_base,
+                          right_base,
+                          destinations);
+  BuildOutputDestinations(split.n_bottom,
+                          split.bottom_left,
+                          split.bottom_right,
+                          base + stride,
+                          stride * 2,
+                          left_base + split.top_left,
+                          right_base + split.top_right,
+                          destinations);
+}
+
+void ApplyOutputSwaps(unsigned char *data,
+                      size_t n,
+                      size_t block_size,
+                      const std::vector<FMSOutputSwap> &swaps)
+{
+  for (size_t i = 0; i < swaps.size(); ++i)
+  {
+    const FMSOutputSwap &swap = swaps[i];
+    if (swap.first >= n || swap.second >= n)
+      throw std::invalid_argument("Invalid FMS output swap");
+    unsigned char *first = data + swap.first * block_size;
+    unsigned char *second = data + swap.second * block_size;
+    for (size_t byte = 0; byte < block_size; ++byte)
+      std::swap(first[byte], second[byte]);
+  }
+}
+
+bool IsBalancedPowerOfTwo(size_t n, size_t n_left, size_t n_right)
+{
+  return n >= 2 && (n & (n - 1)) == 0 &&
+         n_left == n / 2 && n_right == n / 2;
+}
+
+size_t WriteLevelOrderControls(const std::vector<uint8_t> &source,
+                               std::vector<uint8_t> *destination,
+                               size_t n,
+                               size_t root_half,
+                               size_t depth,
+                               size_t stride,
+                               size_t residue,
+                               size_t position)
+{
+  const size_t gate_count = n / 2;
+  const size_t stage_start = depth * root_half;
+  for (size_t gate = 0; gate < gate_count; ++gate)
+    (*destination)[stage_start + gate * stride + residue] =
+        source[position + gate];
+  position += gate_count;
+  if (n == 2)
+    return position;
+
+  position = WriteLevelOrderControls(source, destination, n / 2,
+                                     root_half, depth + 1, stride * 2,
+                                     residue, position);
+  return WriteLevelOrderControls(source, destination, n / 2,
+                                 root_half, depth + 1, stride * 2,
+                                 residue + stride, position);
+}
+
+struct GenericGate
+{
+  void operator()(unsigned char *first,
+                  unsigned char *second,
+                  size_t block_size,
+                  uint8_t control) const
+  {
+    detail::ApplyOFork(first, second, block_size, control);
+  }
+};
+
+template <typename Gate>
+void ApplyLevelOrderedGates(unsigned char *data,
+                            const uint8_t *controls,
+                            size_t n,
+                            size_t block_size,
+                            const Gate &apply_gate)
+{
+  size_t position = 0;
+  for (size_t stride = 1; stride < n; stride *= 2)
+  {
+    for (size_t base = 0; base < n; base += stride * 2)
+    {
+      unsigned char *first = data + base * block_size;
+      unsigned char *second = first + stride * block_size;
+      for (size_t offset = 0; offset < stride; ++offset)
+      {
+        apply_gate(first, second, block_size, controls[position++]);
+        first += block_size;
+        second += block_size;
+      }
+    }
+  }
+}
+
+#ifndef BEFTS_MODE
+// Keep the hot loop equivalent to the original OFork implementation: choose
+// the assembly specialization once and read controls through a raw pointer.
+template <OFork_Style style>
+void ApplyLevelOrderedWithStyle(unsigned char *data,
+                                const uint8_t *controls,
+                                size_t n,
+                                size_t block_size)
+{
+  size_t position = 0;
+  for (size_t stride = 1; stride < n; stride <<= 1U)
+  {
+    for (size_t base = 0; base < n; base += stride * 2)
+    {
+      unsigned char *first = data + base * block_size;
+      unsigned char *second = first + stride * block_size;
+      for (size_t offset = 0; offset < stride; ++offset)
+      {
+        const uint8_t control = controls[position++];
+        const uint8_t left_flag = static_cast<uint8_t>((control >> 1U) & 1U);
+        const uint8_t right_flag = static_cast<uint8_t>(control & 1U);
+        ofork_buffer<style>(first,
+                            second,
+                            static_cast<uint32_t>(block_size),
+                            left_flag,
+                            right_flag);
+        first += block_size;
+        second += block_size;
+      }
+    }
+  }
+}
+#endif
 
 } // namespace
 
@@ -473,6 +578,180 @@ std::vector<uint8_t> FMSControl(const std::vector<uint8_t> &tags,
   return controls;
 }
 
+std::vector<FMSOutputSwap> FMSOutputSwaps(size_t n,
+                                           size_t n_left,
+                                           size_t n_right)
+{
+  ValidateCapacities(n, n_left, n_right);
+  std::vector<size_t> destinations(n);
+  BuildOutputDestinations(n, n_left, n_right, 0, 1, 0, n_left,
+                          &destinations);
+
+  std::vector<uint8_t> visited(n, 0);
+  std::vector<FMSOutputSwap> swaps;
+  swaps.reserve(n - 1);
+  for (size_t first = 0; first < n; ++first)
+  {
+    if (visited[first] != 0)
+      continue;
+    visited[first] = 1;
+    size_t next = destinations[first];
+    while (next != first)
+    {
+      if (next >= n || visited[next] != 0)
+        throw std::logic_error("Invalid FMS output permutation");
+      swaps.push_back(FMSOutputSwap{first, next});
+      visited[next] = 1;
+      next = destinations[next];
+    }
+  }
+  return swaps;
+}
+
+std::vector<uint8_t> FMSLevelOrderControls(
+    const std::vector<uint8_t> &controls,
+    size_t n,
+    size_t n_left,
+    size_t n_right)
+{
+  ValidateCapacities(n, n_left, n_right);
+  if (!IsBalancedPowerOfTwo(n, n_left, n_right))
+    throw std::invalid_argument("Level-order FMS requires balanced power-of-two capacities");
+  const size_t required = FMSControlCountImpl(n, n_left, n_right);
+  if (controls.size() != required)
+    throw std::length_error("FMS control array length mismatch");
+
+  std::vector<uint8_t> level_controls(required);
+  const size_t next = WriteLevelOrderControls(
+      controls, &level_controls, n, n / 2, 0, 1, 0, 0);
+  if (next != required)
+    throw std::logic_error("FMS level-order conversion mismatch");
+  return level_controls;
+}
+
+void FMSApplyInPlace(unsigned char *data,
+                     const std::vector<uint8_t> &controls,
+                     const std::vector<FMSOutputSwap> &output_swaps,
+                     size_t n,
+                     size_t n_left,
+                     size_t n_right,
+                     size_t block_size,
+                     bool apply_output_swaps)
+{
+  ValidateCapacities(n, n_left, n_right);
+  const size_t required = FMSControlCountImpl(n, n_left, n_right);
+  if (controls.size() != required)
+    throw std::length_error("FMS control array length mismatch");
+  FMSApplyPreparedInPlace(data, controls, output_swaps, n, n_left, n_right,
+                          block_size, apply_output_swaps);
+}
+
+void FMSApplyPreparedInPlace(unsigned char *data,
+                             const std::vector<uint8_t> &controls,
+                             const std::vector<FMSOutputSwap> &output_swaps,
+                             size_t n,
+                             size_t n_left,
+                             size_t n_right,
+                             size_t block_size,
+                             bool apply_output_swaps)
+{
+  ValidateCapacities(n, n_left, n_right);
+  size_t data_bytes = 0;
+  if (data == NULL || block_size == 0 ||
+      MulOverflowSize(n, block_size, &data_bytes))
+    throw std::invalid_argument("Invalid FMS data dimensions");
+  (void)data_bytes;
+
+  const size_t next = FMSApplyStrided(
+      data, controls, n, n_left, n_right, block_size, 1, 0);
+  if (next != controls.size())
+    throw std::logic_error("FMS control consumption mismatch");
+  if (apply_output_swaps)
+    ApplyOutputSwaps(data, n, block_size, output_swaps);
+}
+
+void FMSApplyLevelOrderedInPlace(
+    unsigned char *data,
+    const std::vector<uint8_t> &level_controls,
+    const std::vector<FMSOutputSwap> &output_swaps,
+    size_t n,
+    size_t n_left,
+    size_t n_right,
+    size_t block_size,
+    bool apply_output_swaps)
+{
+  ValidateCapacities(n, n_left, n_right);
+  const size_t required = FMSControlCountImpl(n, n_left, n_right);
+  if (level_controls.size() != required)
+    throw std::length_error("FMS control array length mismatch");
+  FMSApplyPreparedLevelOrderedInPlace(
+      data, level_controls, output_swaps, n, n_left, n_right,
+      block_size, apply_output_swaps);
+}
+
+void FMSApplyPreparedLevelOrderedInPlace(
+    unsigned char *data,
+    const std::vector<uint8_t> &level_controls,
+    const std::vector<FMSOutputSwap> &output_swaps,
+    size_t n,
+    size_t n_left,
+    size_t n_right,
+    size_t block_size,
+    bool apply_output_swaps)
+{
+  ValidateCapacities(n, n_left, n_right);
+  size_t data_bytes = 0;
+  if (!IsBalancedPowerOfTwo(n, n_left, n_right) ||
+      data == NULL || block_size == 0 ||
+      MulOverflowSize(n, block_size, &data_bytes))
+    throw std::invalid_argument("Invalid level-order FMS dimensions");
+  (void)data_bytes;
+
+#ifndef BEFTS_MODE
+  if (block_size == 4)
+    ApplyLevelOrderedWithStyle<OFORK_4>(
+        data, level_controls.data(), n, block_size);
+  else if (block_size == 8)
+    ApplyLevelOrderedWithStyle<OFORK_8>(
+        data, level_controls.data(), n, block_size);
+  else if (block_size == 12)
+    ApplyLevelOrderedWithStyle<OFORK_12>(
+        data, level_controls.data(), n, block_size);
+  else if (block_size == 16)
+    ApplyLevelOrderedWithStyle<OFORK_16>(
+        data, level_controls.data(), n, block_size);
+  else if (block_size == 24)
+    ApplyLevelOrderedWithStyle<OFORK_24>(
+        data, level_controls.data(), n, block_size);
+  else if (block_size >= 16 && block_size % 16 == 0)
+    ApplyLevelOrderedWithStyle<OFORK_16X>(
+        data, level_controls.data(), n, block_size);
+  else if (block_size >= 24 && block_size % 16 == 8)
+    ApplyLevelOrderedWithStyle<OFORK_8_16X>(
+        data, level_controls.data(), n, block_size);
+  else
+#endif
+    ApplyLevelOrderedGates(data, level_controls.data(), n, block_size,
+                           GenericGate());
+
+  if (apply_output_swaps)
+    ApplyOutputSwaps(data, n, block_size, output_swaps);
+}
+
+void FMSApplyOutputSwapsInPlace(
+    unsigned char *data,
+    size_t n,
+    size_t block_size,
+    const std::vector<FMSOutputSwap> &output_swaps)
+{
+  size_t data_bytes = 0;
+  if (data == NULL || block_size == 0 ||
+      MulOverflowSize(n, block_size, &data_bytes))
+    throw std::invalid_argument("Invalid FMS data dimensions");
+  (void)data_bytes;
+  ApplyOutputSwaps(data, n, block_size, output_swaps);
+}
+
 FMSControlReadResult FMSControlRead(const unsigned char *data,
                                     const std::vector<uint8_t> &controls,
                                     size_t n,
@@ -498,8 +777,21 @@ FMSControlReadResult FMSControlRead(const unsigned char *data,
   if (invalid_control != 0)
     throw std::invalid_argument("Invalid FMS control word");
 
-  return FMSControlReadImpl(
-      data, controls, n, n_left, n_right, block_size, position);
+  std::vector<unsigned char> work(data, data + data_bytes);
+  const size_t next = FMSApplyStrided(
+      work.data(), controls, n, n_left, n_right, block_size, 1, position);
+  if (next != position + required)
+    throw std::logic_error("FMS control consumption mismatch");
+  const std::vector<FMSOutputSwap> output_swaps =
+      FMSOutputSwaps(n, n_left, n_right);
+  ApplyOutputSwaps(work.data(), n, block_size, output_swaps);
+
+  FMSControlReadResult result;
+  const size_t left_bytes = n_left * block_size;
+  result.left.assign(work.begin(), work.begin() + left_bytes);
+  result.right.assign(work.begin() + left_bytes, work.end());
+  result.next_pos = next;
+  return result;
 }
 
 FMSDataResult FMSApply(const unsigned char *data,

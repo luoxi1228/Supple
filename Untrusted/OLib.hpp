@@ -4,7 +4,7 @@
   #include <stddef.h>
   #include <stdint.h>
 
-  void OLib_initialize();
+  bool OLib_initialize();
 
   void Enclave_loadTestKeys(unsigned char inkey[16], unsigned char outkey[16]);
 

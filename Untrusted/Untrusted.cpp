@@ -402,12 +402,8 @@ int initialize_enclave(void) {
 int8_t Enclave_Initialize(unsigned char *bin_x, unsigned char* bin_y,
        unsigned char *bin_r, unsigned char* bin_s, uint32_t buff_size) {
 
-  int8_t ret;
-
   // Initialize the enclave
   if(initialize_enclave() < 0) {
-    printf("Enter a character before exit ...\n");
-    getchar();
     return -1;
   }
 
@@ -426,11 +422,11 @@ int8_t Enclave_Initialize(unsigned char *bin_x, unsigned char* bin_y,
 
   // Extract Public Key and send it over
   // InitializeKeys(global_eid, &ret, bin_x, bin_y, bin_r, bin_s, buff_size);
-  return ret;
+  return 0;
 }
 
-void OLib_initialize(){
-  Enclave_Initialize(NULL, NULL, NULL, NULL, 32);
+bool OLib_initialize(){
+  return Enclave_Initialize(NULL, NULL, NULL, NULL, 32) == 0;
 }
 
 void Enclave_loadTestKeys(unsigned char inkey[16], unsigned char outkey[16]) {

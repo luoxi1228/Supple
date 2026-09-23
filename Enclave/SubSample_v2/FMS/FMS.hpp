@@ -48,6 +48,12 @@ struct FMSControlReadResult
   size_t next_pos;
 };
 
+struct FMSOutputSwap
+{
+  size_t first;
+  size_t second;
+};
+
 std::array<uint8_t, 10> FMSPairMask(uint8_t x, uint8_t y);
 
 uint8_t OForkControl(uint8_t x,
@@ -78,6 +84,69 @@ std::vector<uint8_t> FMSControl(const std::vector<uint8_t> &tags,
                                 size_t n,
                                 size_t n_left,
                                 size_t n_right);
+
+// The output order is public: prepare this swap plan before online execution.
+std::vector<FMSOutputSwap> FMSOutputSwaps(size_t n,
+                                           size_t n_left,
+                                           size_t n_right);
+
+// Reorder a balanced power-of-two control tape for the original level-order
+// OFork network. This conversion depends only on public dimensions.
+std::vector<uint8_t> FMSLevelOrderControls(
+    const std::vector<uint8_t> &controls,
+    size_t n,
+    size_t n_left,
+    size_t n_right);
+
+// Apply prepared controls directly to a writable n-record buffer. This path
+// performs no dynamic allocations and preserves FMSControlRead's output order.
+void FMSApplyInPlace(unsigned char *data,
+                     const std::vector<uint8_t> &controls,
+                     const std::vector<FMSOutputSwap> &output_swaps,
+                     size_t n,
+                     size_t n_left,
+                     size_t n_right,
+                     size_t block_size,
+                     bool apply_output_swaps = true);
+
+void FMSApplyLevelOrderedInPlace(
+    unsigned char *data,
+    const std::vector<uint8_t> &level_controls,
+    const std::vector<FMSOutputSwap> &output_swaps,
+    size_t n,
+    size_t n_left,
+    size_t n_right,
+    size_t block_size,
+    bool apply_output_swaps = true);
+
+// The following entry points skip the recursive control-count check. Call
+// them only with controls already validated during the offline prepare phase.
+void FMSApplyPreparedInPlace(
+    unsigned char *data,
+    const std::vector<uint8_t> &controls,
+    const std::vector<FMSOutputSwap> &output_swaps,
+    size_t n,
+    size_t n_left,
+    size_t n_right,
+    size_t block_size,
+    bool apply_output_swaps = true);
+
+void FMSApplyPreparedLevelOrderedInPlace(
+    unsigned char *data,
+    const std::vector<uint8_t> &level_controls,
+    const std::vector<FMSOutputSwap> &output_swaps,
+    size_t n,
+    size_t n_left,
+    size_t n_right,
+    size_t block_size,
+    bool apply_output_swaps = true);
+
+// Complete the public output permutation after a network-only apply.
+void FMSApplyOutputSwapsInPlace(
+    unsigned char *data,
+    size_t n,
+    size_t block_size,
+    const std::vector<FMSOutputSwap> &output_swaps);
 
 FMSControlReadResult FMSControlRead(const unsigned char *data,
                                     const std::vector<uint8_t> &controls,

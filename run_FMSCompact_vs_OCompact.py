@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import csv
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,17 +9,26 @@ from typing import Callable, Dict, List, TypeVar
 
 T = TypeVar("T")
 
+# Edit these defaults for no-argument runs; command-line options override them.
+DEFAULT_BINARY = "Application/fmscompact_vs_ocompact"
+DEFAULT_N = [1048576]
+DEFAULT_BLOCK_SIZES = [8,16,32]
+DEFAULT_FORK_RATIOS = [0.25]
+DEFAULT_REPEAT = 15
+DEFAULT_WARMUP = 5
+DEFAULT_SEED = 20260903
+DEFAULT_OUTPUT = "RESULTS/fmscompact_vs_ocompact.csv"
+
+# FMS timing fields exclude output reordering, which still runs afterward.
 BINARY_FIELDS = [
     "n",
     "block_size",
     "fork_ratio",
     "repeats",
     "control_words",
-    "fms_control_us",
-    "fmscompact_us",
-    "ocompact_us",
-    "fmscompact_ns_per_item",
-    "ocompact_ns_per_item",
+    "fms_control_ms",
+    "fmscompact_ms",
+    "ocompact_ms",
     "speedup",
     "correct",
 ]
@@ -34,11 +42,9 @@ CSV_FIELDS = [
     "warmups",
     "seed",
     "control_words",
-    "fms_control_us",
-    "fmscompact_us",
-    "ocompact_us",
-    "fmscompact_ns_per_item",
-    "ocompact_ns_per_item",
+    "fms_control_ms",
+    "fmscompact_ms",
+    "ocompact_ms",
     "speedup",
     "correct",
 ]
@@ -66,39 +72,46 @@ def parse_csv_values(raw: str, cast: Callable[[str], T], name: str) -> List[T]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Compare one online FMSCompact with one OCompact operation "
-            "inside the Supple SGX enclave"
+            "Compare FMSCompact apply (excluding output "
+            "reordering) with one OCompact operation inside the Supple "
+            "SGX enclave"
         )
     )
     parser.add_argument(
         "--binary",
-        default="Application/fmscompact_vs_ocompact",
+        default=DEFAULT_BINARY,
         help="benchmark executable relative to the project root",
     )
     parser.add_argument(
         "--n",
-        default="262144",
+        default=",".join(map(str, DEFAULT_N)),
         help="comma-separated input sizes (each must be at least 2)",
     )
     parser.add_argument(
         "--block-sizes",
-        default="8",
+        default=",".join(map(str, DEFAULT_BLOCK_SIZES)),
         help="comma-separated supported record sizes in bytes",
     )
     parser.add_argument(
         "--fork-ratios",
-        default="0.25",
+        default=",".join(map(str, DEFAULT_FORK_RATIOS)),
         help=(
             "comma-separated #11/n ratios in [0,0.5]; each generated case "
             "also has #00=#11 and balanced left/right responsibilities"
         ),
     )
-    parser.add_argument("--repeat", type=int, default=11)
-    parser.add_argument("--warmup", type=int, default=3)
-    parser.add_argument("--seed", type=int, default=20260903)
+    parser.add_argument(
+        "--repeat", type=int, default=DEFAULT_REPEAT,
+        help="number of measured rounds averaged after warm-up",
+    )
+    parser.add_argument(
+        "--warmup", type=int, default=DEFAULT_WARMUP,
+        help="number of excluded warm-up rounds",
+    )
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument(
         "--output",
-        default="RESULTS/fmscompact_vs_ocompact.csv",
+        default=DEFAULT_OUTPUT,
         help="CSV output path relative to the project root",
     )
     parser.add_argument(
@@ -172,9 +185,10 @@ def main() -> int:
     output = (project_root / args.output).resolve()
 
     if args.build:
-        jobs = max(1, os.cpu_count() or 1)
+        # The root Makefile's configuration target removes generated objects.
+        # Run it serially so cleanup cannot race with compilation or linking.
         completed = subprocess.run(
-            ["make", f"-j{jobs}"],
+            ["make", "-j1"],
             cwd=str(project_root),
         )
         if completed.returncode != 0:
@@ -240,12 +254,12 @@ def main() -> int:
                 print(
                     "  offline generation: "
                     f"FMSControl="
-                    f"{float(result['fms_control_us']):.3f} us"
+                    f"{float(result['fms_control_ms']):.3f} ms"
                 )
                 print(
-                    "  online median: "
-                    f"FMSCompact={float(result['fmscompact_us']):.3f} us, "
-                    f"OCompact={float(result['ocompact_us']):.3f} us, "
+                    "  online mean: "
+                    f"FMS (no reorder)={float(result['fmscompact_ms']):.3f} ms, "
+                    f"OCompact={float(result['ocompact_ms']):.3f} ms, "
                     f"speedup={float(result['speedup']):.3f}x"
                 )
 

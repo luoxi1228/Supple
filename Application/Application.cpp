@@ -184,7 +184,9 @@ int main(int argc, char *argv[]) {
   }
 
 
-  OLib_initialize();   // Initialize enclave
+  if (!OLib_initialize()) {
+    return 2;
+  }
 
   phase_end = rtclock();
   phase_time = (double)(phase_end - phase_start) / 1000.0;

@@ -23,13 +23,12 @@ struct Summary {
   double ofork_11_ns;
 };
 
-double median(std::vector<double> values) {
-  std::sort(values.begin(), values.end());
-  const size_t middle = values.size() / 2;
-  if ((values.size() & 1U) != 0U) {
-    return values[middle];
+double mean(const std::vector<double> &values) {
+  double total = 0.0;
+  for (double value : values) {
+    total += value;
   }
-  return (values[middle - 1] + values[middle]) / 2.0;
+  return total / static_cast<double>(values.size());
 }
 
 void initialize_input(std::vector<unsigned char> &buffer, size_t block_size) {
@@ -79,8 +78,8 @@ void measure_pair(std::vector<unsigned char> &work,
                   PrimitiveKind second_primitive,
                   uint8_t second_flag0,
                   uint8_t second_flag1,
-                  double *first_median,
-                  double *second_median) {
+                  double *first_mean,
+                  double *second_mean) {
   std::vector<double> first_samples;
   std::vector<double> second_samples;
   first_samples.reserve(repeats);
@@ -110,8 +109,8 @@ void measure_pair(std::vector<unsigned char> &work,
     }
   }
 
-  *first_median = median(first_samples);
-  *second_median = median(second_samples);
+  *first_mean = mean(first_samples);
+  *second_mean = mean(second_samples);
 }
 
 bool verify_result(const std::vector<unsigned char> &actual,
@@ -212,7 +211,9 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  OLib_initialize();
+  if (!OLib_initialize()) {
+    return 2;
+  }
 
   if (!check_correctness(block_size)) {
     std::fprintf(stderr,
