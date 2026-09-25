@@ -11,13 +11,13 @@ T = TypeVar("T")
 
 # Edit these defaults for no-argument runs; command-line options override them.
 DEFAULT_BINARY = "Application/fmscompact_vs_ocompact"
-DEFAULT_N = [1048576]
-DEFAULT_BLOCK_SIZES = [8,16,32]
+DEFAULT_N = [1048576]#[1048576, 2097152, 4194304, 8388608, 16777216]
+DEFAULT_BLOCK_SIZES = [4096]#[4,8,12,16,24,32,64,128,256,512,1024]
 DEFAULT_FORK_RATIOS = [0.25]
 DEFAULT_REPEAT = 15
 DEFAULT_WARMUP = 5
 DEFAULT_SEED = 20260903
-DEFAULT_OUTPUT = "RESULTS/fmscompact_vs_ocompact.csv"
+DEFAULT_OUTPUT = "RESULTS/fmscompact_postorder_vs_ocompact.csv"
 
 # FMS timing fields exclude output reordering, which still runs afterward.
 BINARY_FIELDS = [
@@ -26,6 +26,7 @@ BINARY_FIELDS = [
     "fork_ratio",
     "repeats",
     "control_words",
+    "fms_schedule",
     "fms_control_ms",
     "fmscompact_ms",
     "ocompact_ms",
@@ -42,6 +43,7 @@ CSV_FIELDS = [
     "warmups",
     "seed",
     "control_words",
+    "fms_schedule",
     "fms_control_ms",
     "fmscompact_ms",
     "ocompact_ms",
@@ -258,16 +260,38 @@ def main() -> int:
                 )
                 print(
                     "  online mean: "
-                    f"FMS (no reorder)={float(result['fmscompact_ms']):.3f} ms, "
+                    f"FMS {result['fms_schedule']} "
+                    f"(no output reorder)={float(result['fmscompact_ms']):.3f} ms, "
                     f"OCompact={float(result['ocompact_ms']):.3f} ms, "
                     f"speedup={float(result['speedup']):.3f}x"
                 )
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w", newline="") as stream:
+    has_results = output.is_file() and output.stat().st_size > 0
+    separator = ""
+    if has_results:
+        with output.open("rb") as existing:
+            header_line = existing.readline().decode("utf-8").rstrip("\r\n")
+            header = next(csv.reader([header_line]))
+            if header != CSV_FIELDS:
+                print(
+                    f"CSV header does not match the current benchmark: {output}",
+                    file=sys.stderr,
+                )
+                return 2
+            existing.seek(0, 2)
+            existing.seek(max(0, existing.tell() - 4))
+            tail = existing.read()
+        if not (tail.endswith(b"\r\n\r\n") or tail.endswith(b"\n\n")):
+            separator = "\r\n" if tail.endswith(b"\n") else "\r\n\r\n"
+
+    with output.open("a", newline="") as stream:
+        stream.write(separator)
         writer = csv.DictWriter(stream, fieldnames=CSV_FIELDS)
-        writer.writeheader()
+        if not has_results:
+            writer.writeheader()
         writer.writerows(rows)
+        stream.write("\r\n")
 
     print(f"saved results to: {output}")
     return 0

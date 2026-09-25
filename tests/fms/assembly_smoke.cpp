@@ -70,6 +70,19 @@ static void CheckLevelOrdered(size_t width)
                      expected.left.size()) == 0);
   assert(std::memcmp(data.data() + expected.left.size(),
                      expected.right.data(), expected.right.size()) == 0);
+
+  std::vector<unsigned char> postordered(n * width);
+  for (size_t i = 0; i < n; ++i)
+  {
+    const uint32_t id = static_cast<uint32_t>(i);
+    std::memcpy(postordered.data() + i * width, &id, sizeof(id));
+  }
+  const std::vector<uint8_t> postorder_controls = FMSPostOrderControls(
+      controls, n, n / 2, n / 2);
+  FMSApplyPreparedPostOrderInPlace(
+      postordered.data(), postorder_controls, output_swaps,
+      n, n / 2, n / 2, width);
+  assert(postordered == data);
 }
 
 int main()

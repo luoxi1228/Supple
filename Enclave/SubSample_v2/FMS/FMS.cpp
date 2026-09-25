@@ -258,6 +258,32 @@ size_t WriteLevelOrderControls(const std::vector<uint8_t> &source,
                                  residue + stride, position);
 }
 
+// The level-order tape identifies a gate by its butterfly stage and its
+// position within that stage. Emit the same gates in the contiguous-block
+// postorder used by TightCompact_2power_inner.
+size_t WritePostOrderControls(const std::vector<uint8_t> &level_controls,
+                              std::vector<uint8_t> *destination,
+                              size_t base,
+                              size_t length,
+                              size_t stage,
+                              size_t root_half,
+                              size_t position)
+{
+  const size_t half = length / 2;
+  if (length > 2)
+  {
+    position = WritePostOrderControls(level_controls, destination, base,
+                                      half, stage - 1, root_half, position);
+    position = WritePostOrderControls(level_controls, destination, base + half,
+                                      half, stage - 1, root_half, position);
+  }
+  const size_t source = stage * root_half + base / 2;
+  std::copy(level_controls.begin() + source,
+            level_controls.begin() + source + half,
+            destination->begin() + position);
+  return position + half;
+}
+
 struct GenericGate
 {
   void operator()(unsigned char *first,
@@ -293,6 +319,33 @@ void ApplyLevelOrderedGates(unsigned char *data,
   }
 }
 
+template <typename Gate>
+size_t ApplyPostOrderGates(unsigned char *data,
+                           const uint8_t *controls,
+                           size_t n,
+                           size_t block_size,
+                           size_t position,
+                           const Gate &apply_gate)
+{
+  const size_t half = n / 2;
+  if (n > 2)
+  {
+    position = ApplyPostOrderGates(data, controls, half, block_size,
+                                   position, apply_gate);
+    position = ApplyPostOrderGates(data + half * block_size, controls,
+                                   half, block_size, position, apply_gate);
+  }
+  unsigned char *first = data;
+  unsigned char *second = data + half * block_size;
+  for (size_t i = 0; i < half; ++i)
+  {
+    apply_gate(first, second, block_size, controls[position++]);
+    first += block_size;
+    second += block_size;
+  }
+  return position;
+}
+
 #ifndef BEFTS_MODE
 // Keep the hot loop equivalent to the original OFork implementation: choose
 // the assembly specialization once and read controls through a raw pointer.
@@ -325,6 +378,20 @@ void ApplyLevelOrderedWithStyle(unsigned char *data,
     }
   }
 }
+
+template <OFork_Style style>
+struct StyledGate
+{
+  void operator()(unsigned char *first,
+                  unsigned char *second,
+                  size_t block_size,
+                  uint8_t control) const
+  {
+    ofork_buffer<style>(first, second, static_cast<uint32_t>(block_size),
+                        static_cast<uint8_t>((control >> 1U) & 1U),
+                        static_cast<uint8_t>(control & 1U));
+  }
+};
 #endif
 
 } // namespace
@@ -629,6 +696,25 @@ std::vector<uint8_t> FMSLevelOrderControls(
   return level_controls;
 }
 
+std::vector<uint8_t> FMSPostOrderControls(
+    const std::vector<uint8_t> &controls,
+    size_t n,
+    size_t n_left,
+    size_t n_right)
+{
+  const std::vector<uint8_t> level_controls =
+      FMSLevelOrderControls(controls, n, n_left, n_right);
+  size_t stage = 0;
+  for (size_t length = n; length > 2; length /= 2)
+    ++stage;
+  std::vector<uint8_t> postorder_controls(level_controls.size());
+  const size_t next = WritePostOrderControls(
+      level_controls, &postorder_controls, 0, n, stage, n / 2, 0);
+  if (next != postorder_controls.size())
+    throw std::logic_error("FMS postorder conversion mismatch");
+  return postorder_controls;
+}
+
 void FMSApplyInPlace(unsigned char *data,
                      const std::vector<uint8_t> &controls,
                      const std::vector<FMSOutputSwap> &output_swaps,
@@ -734,6 +820,80 @@ void FMSApplyPreparedLevelOrderedInPlace(
     ApplyLevelOrderedGates(data, level_controls.data(), n, block_size,
                            GenericGate());
 
+  if (apply_output_swaps)
+    ApplyOutputSwaps(data, n, block_size, output_swaps);
+}
+
+void FMSApplyPostOrderInPlace(
+    unsigned char *data,
+    const std::vector<uint8_t> &postorder_controls,
+    const std::vector<FMSOutputSwap> &output_swaps,
+    size_t n,
+    size_t n_left,
+    size_t n_right,
+    size_t block_size,
+    bool apply_output_swaps)
+{
+  ValidateCapacities(n, n_left, n_right);
+  const size_t required = FMSControlCountImpl(n, n_left, n_right);
+  if (postorder_controls.size() != required)
+    throw std::length_error("FMS control array length mismatch");
+  FMSApplyPreparedPostOrderInPlace(
+      data, postorder_controls, output_swaps, n, n_left, n_right,
+      block_size, apply_output_swaps);
+}
+
+void FMSApplyPreparedPostOrderInPlace(
+    unsigned char *data,
+    const std::vector<uint8_t> &postorder_controls,
+    const std::vector<FMSOutputSwap> &output_swaps,
+    size_t n,
+    size_t n_left,
+    size_t n_right,
+    size_t block_size,
+    bool apply_output_swaps)
+{
+  ValidateCapacities(n, n_left, n_right);
+  size_t data_bytes = 0;
+  if (!IsBalancedPowerOfTwo(n, n_left, n_right) ||
+      data == NULL || block_size == 0 ||
+      MulOverflowSize(n, block_size, &data_bytes))
+    throw std::invalid_argument("Invalid postorder FMS dimensions");
+  (void)data_bytes;
+
+  const uint8_t *control_data = postorder_controls.data();
+  size_t next = 0;
+#ifndef BEFTS_MODE
+  if (block_size == 4)
+    next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
+                               StyledGate<OFORK_4>());
+  else if (block_size == 8)
+    next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
+                               StyledGate<OFORK_8>());
+  else if (block_size == 12)
+    next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
+                               StyledGate<OFORK_12>());
+  else if (block_size == 16)
+    next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
+                               StyledGate<OFORK_16>());
+  else if (block_size == 24)
+    next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
+                               StyledGate<OFORK_24>());
+  else if (block_size >= 16 && block_size % 16 == 0 &&
+           block_size <= std::numeric_limits<uint32_t>::max())
+    next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
+                               StyledGate<OFORK_16X>());
+  else if (block_size >= 24 && block_size % 16 == 8 &&
+           block_size <= std::numeric_limits<uint32_t>::max())
+    next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
+                               StyledGate<OFORK_8_16X>());
+  else
+#endif
+    next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
+                               GenericGate());
+
+  if (next != postorder_controls.size())
+    throw std::logic_error("FMS postorder control consumption mismatch");
   if (apply_output_swaps)
     ApplyOutputSwaps(data, n, block_size, output_swaps);
 }

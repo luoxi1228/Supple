@@ -156,6 +156,22 @@ static void Verify(const std::vector<uint8_t> &tags,
       FMSApplyOutputSwapsInPlace(
           prepared_level.data(), n, width, output_swaps);
       assert(prepared_level == level_ordered);
+
+      const std::vector<uint8_t> postorder_controls =
+          FMSPostOrderControls(controls, n, n_left, n_right);
+      assert(postorder_controls.size() == controls.size());
+      std::vector<unsigned char> postordered = data;
+      FMSApplyPostOrderInPlace(postordered.data(), postorder_controls,
+                               output_swaps, n, n_left, n_right, width);
+      assert(postordered == in_place);
+
+      std::vector<unsigned char> prepared_postorder = data;
+      FMSApplyPreparedPostOrderInPlace(
+          prepared_postorder.data(), postorder_controls, output_swaps,
+          n, n_left, n_right, width, false);
+      FMSApplyOutputSwapsInPlace(
+          prepared_postorder.data(), n, width, output_swaps);
+      assert(prepared_postorder == in_place);
     }
 
     const FMSDataResult compacted = FMSCompact(
@@ -265,6 +281,28 @@ static void RandomLarge()
   }
 }
 
+static void BalancedPostOrder()
+{
+  std::mt19937 random(20260925);
+  const size_t lengths[] = {2, 4, 8, 16, 32, 64, 256, 1024};
+  const size_t widths[] = {4, 7, 8, 12, 16, 24, 40, 64};
+  for (size_t n : lengths)
+  {
+    for (size_t width : widths)
+    {
+      std::vector<uint8_t> tags(n, FMS_TAG_ZERO);
+      for (size_t i = 0; i < n / 4; ++i)
+      {
+        tags[i] = FMS_TAG_BOTH;
+        tags[n / 4 + i] = FMS_TAG_LEFT;
+        tags[n / 2 + i] = FMS_TAG_RIGHT;
+      }
+      std::shuffle(tags.begin(), tags.end(), random);
+      Verify(tags, n / 2, n / 2, width, true);
+    }
+  }
+}
+
 static void CheckHelpersAndErrors()
 {
   size_t pair_index = 0;
@@ -365,6 +403,7 @@ int main()
   ExhaustiveExact();
   ExhaustiveNormalize();
   RandomLarge();
+  BalancedPostOrder();
   std::printf("PASS: %zu exact routings, %zu normalization/capacity cases, "
               "arbitrary lengths, offsets, one-sided outputs, and large inputs\n",
               exact_cases,

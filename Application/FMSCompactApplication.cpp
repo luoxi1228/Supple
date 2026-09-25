@@ -371,13 +371,15 @@ int main(int argc, char **argv)
                              : std::numeric_limits<double>::infinity();
 
   std::printf(
-      "RESULT,%zu,%zu,%.9f,%zu,%zu,%.9f,"
+      "RESULT,%zu,%zu,%.9f,%zu,%zu,%s,%.9f,"
       "%.9f,%.9f,%.9f,1\n",
       n,
       block_size,
       actual_fork_ratio,
       repeats,
       control_words,
+      (n >= 2 && (n & (n - 1)) == 0 && n_left == n / 2)
+          ? "postorder" : "strided",
       fms_control_ms,
       fmscompact_ms,
       ocompact_ms,

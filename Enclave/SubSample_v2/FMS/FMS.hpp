@@ -98,6 +98,15 @@ std::vector<uint8_t> FMSLevelOrderControls(
     size_t n_left,
     size_t n_right);
 
+// Offline conversion for balanced power-of-two dimensions. The resulting
+// tape finishes each contiguous half before the gates between the halves,
+// matching ORCompact's execution order.
+std::vector<uint8_t> FMSPostOrderControls(
+    const std::vector<uint8_t> &controls,
+    size_t n,
+    size_t n_left,
+    size_t n_right);
+
 // Apply prepared controls directly to a writable n-record buffer. This path
 // performs no dynamic allocations and preserves FMSControlRead's output order.
 void FMSApplyInPlace(unsigned char *data,
@@ -112,6 +121,17 @@ void FMSApplyInPlace(unsigned char *data,
 void FMSApplyLevelOrderedInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &level_controls,
+    const std::vector<FMSOutputSwap> &output_swaps,
+    size_t n,
+    size_t n_left,
+    size_t n_right,
+    size_t block_size,
+    bool apply_output_swaps = true);
+
+// Apply a tape returned by FMSPostOrderControls. Balanced power-of-two only.
+void FMSApplyPostOrderInPlace(
+    unsigned char *data,
+    const std::vector<uint8_t> &postorder_controls,
     const std::vector<FMSOutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
@@ -134,6 +154,16 @@ void FMSApplyPreparedInPlace(
 void FMSApplyPreparedLevelOrderedInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &level_controls,
+    const std::vector<FMSOutputSwap> &output_swaps,
+    size_t n,
+    size_t n_left,
+    size_t n_right,
+    size_t block_size,
+    bool apply_output_swaps = true);
+
+void FMSApplyPreparedPostOrderInPlace(
+    unsigned char *data,
+    const std::vector<uint8_t> &postorder_controls,
     const std::vector<FMSOutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
