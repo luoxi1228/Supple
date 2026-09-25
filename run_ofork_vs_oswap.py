@@ -8,13 +8,13 @@ from typing import List
 
 
 # Edit these defaults for no-argument runs; command-line options override them.
-DEFAULT_BINARY = "Application/primitive_benchmark"
+DEFAULT_BINARY = "Application/ofork_vs_oswap"
 DEFAULT_BLOCK_SIZES = [4, 8, 12, 16, 24, 32, 64, 128, 256, 512, 1024, 4096]
 DEFAULT_PAIRS = [1048576]  # 0 derives pairs from DEFAULT_TARGET_BYTES.
 DEFAULT_TARGET_BYTES = 64 * 1024 * 1024
 DEFAULT_REPEAT = 15
 DEFAULT_WARMUP = 5
-DEFAULT_OUTPUT = "RESULTS/oswap_ofork.csv"
+DEFAULT_OUTPUT = "RESULTS/ofork_vs_oswap.csv"
 
 CSV_FIELDS = [
     "block_size",

@@ -133,8 +133,8 @@ endif
 Crypto_Library_Name := sgx_tcrypto
 SGXSSL_INCLUDE_PATH := /opt/intel/sgxssl/include/
 
-Enclave_Cpp_Files := Enclave/Enclave.cpp Enclave/utils.cpp Enclave/RecursiveShuffle/RecursiveShuffle.cpp \
-		Enclave/ObliviousPrimitives.cpp Enclave/TightCompaction/TightCompaction.cpp Enclave/TightCompaction/TightCompaction_v2.cpp \
+Enclave_Cpp_Files := Enclave/Enclave.cpp Enclave/utils.cpp Enclave/ORShuffle/RecursiveShuffle.cpp \
+		Enclave/ObliviousPrimitives.cpp Enclave/ORCompaction/TightCompaction.cpp Enclave/ORCompaction/TightCompaction_v2.cpp \
 		Enclave/SubSample/SubSample.cpp Enclave/PSQF19/SWO/PSQF_SWO.cpp \
 		Enclave/SubSample_v2/SWO/SuppleSWO.cpp Enclave/SubSample_v2/SWO/helper.cpp \
 		Enclave/SubSample_v2/FMS/FMS.cpp Enclave/SubSample_v2/FMS/helper.cpp Enclave/SubSample_v2/FMS/FMSBenchmark.cpp \
@@ -283,5 +283,5 @@ $(Signed_Enclave_Name): $(Enclave_Name) $(Enclave_Config_File)
 .PHONY: clean
 
 clean:
-	rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) Untrusted/Enclave_u.* $(Enclave_Cpp_Objects) Enclave/Enclave_t.* Enclave/*.o Enclave/TightCompaction/*.o
+	rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) Untrusted/Enclave_u.* $(Enclave_Cpp_Objects) Enclave/Enclave_t.* Enclave/*.o Enclave/ORCompaction/*.o Enclave/ORShuffle/*.o
 	cd Application && $(MAKE) clean

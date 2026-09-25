@@ -27,7 +27,7 @@
   #include "Enclave_globals.h"
   #include "oasm_lib.h"
   #include "ObliviousPrimitives.hpp"
-  #include "RecursiveShuffle/RecursiveShuffle.hpp"
+  #include "ORShuffle/RecursiveShuffle.hpp"
  
   static sgx_thread_mutex_t test_mutex;
   static int test_ctr=0;

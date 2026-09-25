@@ -53,8 +53,8 @@ enclave {
     from "TrustedLibrary/Libcxx.edl" import ecall_exception, ecall_map;
     from "TrustedLibrary/Thread.edl" import *;
 
-    from "RecursiveShuffle/RecursiveShuffle.edl" import *;
-    from "TightCompaction/TightCompaction.edl" import *;
+    from "ORShuffle/RecursiveShuffle.edl" import *;
+    from "ORCompaction/TightCompaction.edl" import *;
     from "SubSample/SubSample.edl" import *;
     from "PSQF19/SWO/PSQF_SWO.edl" import *;
     from "SubSample_v2/SWO/SuppleSWO.edl" import *;

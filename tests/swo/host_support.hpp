@@ -86,7 +86,7 @@ static void threadpool_join(size_t id, void **)
 static unsigned long printf_with_rtclock(const char *, ...) { return 0; }
 static unsigned long printf_with_rtclock_diff(unsigned long, const char *, ...) { return 0; }
 
-#include "../../Enclave/TightCompaction/TightCompaction_v2.hpp"
+#include "../../Enclave/ORCompaction/TightCompaction_v2.hpp"
 #define TightCompact_v2 HostTightCompact
 #define TightCompact_v2_parallel HostTightCompactParallel
 #include "../../Enclave/ObliviousPrimitives.cpp"

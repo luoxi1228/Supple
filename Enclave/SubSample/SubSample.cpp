@@ -1,6 +1,6 @@
 #include "SubSample.hpp"
 #include "../ObliviousPrimitives.hpp"
-#include "../RecursiveShuffle/RecursiveShuffle.hpp"
+#include "../ORShuffle/RecursiveShuffle.hpp"
 #include <algorithm>
 #include <memory>
 #include <cstring>

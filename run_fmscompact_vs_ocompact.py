@@ -17,7 +17,7 @@ DEFAULT_FORK_RATIOS = [0.25]
 DEFAULT_REPEAT = 15
 DEFAULT_WARMUP = 5
 DEFAULT_SEED = 20260903
-DEFAULT_OUTPUT = "RESULTS/fmscompact_postorder_vs_ocompact.csv"
+DEFAULT_OUTPUT = "RESULTS/fmscompact_vs_ocompact.csv"
 
 # FMS timing fields exclude output reordering, which still runs afterward.
 BINARY_FIELDS = [

@@ -3,7 +3,7 @@
   #include <cstdint>
   #include <stddef.h>
   #include "oasm_lib.h"
-  #include "TightCompaction/TightCompaction_v2.hpp"
+  #include "ORCompaction/TightCompaction_v2.hpp"
 #endif
 
 

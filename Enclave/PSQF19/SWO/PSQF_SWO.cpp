@@ -1,6 +1,6 @@
 #include "PSQF_SWO.hpp"
 #include "../../ObliviousPrimitives.hpp"
-#include "../../RecursiveShuffle/RecursiveShuffle.hpp"
+#include "../../ORShuffle/RecursiveShuffle.hpp"
 #include <cstring>
 #include <cstdlib>
 

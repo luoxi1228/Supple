@@ -2,9 +2,9 @@
   #define __OBLIVIOUS_PRIMITIVES_HEADER__
 
   #ifndef BEFTS_MODE
-    #include "TightCompaction/TightCompaction_v2.hpp"
+    #include "ORCompaction/TightCompaction_v2.hpp"
     // #include "SortingNetwork/SortingNetwork.hpp"
-    #include "RecursiveShuffle/RecursiveShuffle.hpp"
+    #include "ORShuffle/RecursiveShuffle.hpp"
   #endif
 
   // The new APIs that are more efficient in OSWAP_BUFFER calls:

@@ -18,11 +18,11 @@ ifneq ($(SGX_MODE), HW)
 		-Wl,--as-needed -Wl,--rpath=$(SGX_LIBRARY_PATH)
 endif
 
-all: application primitive_benchmark fmscompact_vs_ocompact
+all: application ofork_vs_oswap fmscompact_vs_ocompact
 
 SAN_OBJS = Application.o gcm.o
-PRIMITIVE_BENCH_OBJS = PrimitiveBenchmark.o
-FMSCOMPACT_BENCH_OBJS = FMSCompactApplication.o
+PRIMITIVE_BENCH_OBJS = ApplicationOFork.o
+FMSCOMPACT_BENCH_OBJS = ApplicationFMSCompact.o
 
 %.o: %.cpp
 	g++ -std=c++11 -O0 -ggdb -c $<
@@ -30,11 +30,11 @@ FMSCOMPACT_BENCH_OBJS = FMSCompactApplication.o
 application: $(SAN_OBJS) libOSort.so
 	g++ -std=c++11 $(SAN_OBJS) $(APP_LINK_FLAGS) -o $@
 
-primitive_benchmark: $(PRIMITIVE_BENCH_OBJS) libOSort.so
+ofork_vs_oswap: $(PRIMITIVE_BENCH_OBJS) libOSort.so
 	g++ -std=c++11 $(PRIMITIVE_BENCH_OBJS) $(APP_LINK_FLAGS) -o $@
 
 fmscompact_vs_ocompact: $(FMSCOMPACT_BENCH_OBJS) libOSort.so
 	g++ -std=c++11 $(FMSCOMPACT_BENCH_OBJS) $(APP_LINK_FLAGS) -o $@
 
 clean:
-	rm -f $(SAN_OBJS) $(PRIMITIVE_BENCH_OBJS) $(FMSCOMPACT_BENCH_OBJS) application primitive_benchmark fmscompact_vs_ocompact
+	rm -f $(SAN_OBJS) $(PRIMITIVE_BENCH_OBJS) $(FMSCOMPACT_BENCH_OBJS) application ofork_vs_oswap fmscompact_vs_ocompact
