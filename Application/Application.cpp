@@ -48,34 +48,35 @@ void parseCommandLineArguments(int argc, char *argv[]) {
       argc != (NUM_ARGUMENTS_REQUIRED + 3)) {
     printf("Did NOT receive the right number of command line arguments.\n"
           "Usage: ./application <1|2|3> <N> <BLOCK_SIZE> <P> <REPEAT>\n"
-          "   or: ./application <4|5|6> <N> <BLOCK_SIZE> <P> <K> <REPEAT>\n"
+          "   or: ./application <4|5|6|8> <N> <BLOCK_SIZE> <P> <K> <REPEAT>\n"
           "   or: ./application <7> <N> <BLOCK_SIZE> <P> <K> <NTHREADS> <REPEAT>\n\n"
-           "Oblivious SubSampling (1/2/3/4/5/6/7)\n"
+           "Oblivious SubSampling (1/2/3/4/5/6/7/8)\n"
           "  (1) PSQF_single (shuffle all then take first N*P)\n"
            "  (2) PSQF_SWO (Algorithm 1)\n"
           "  (3) SubSample (randomly select N*P items, then compact)\n"
            "  (4) SubSampleMulti\n"
            "  (5) SubSampleMulti_opt\n"
            "  (6) SuppleSWO\n"
-           "  (7) SuppleSWO_parallel\n");
+           "  (7) SuppleSWO_parallel\n"
+           "  (8) OFRSupple\n");
     exit(0);
   }
 
   MODE = atoi(argv[1]);
-  if (MODE < 1 || MODE > 7) {
-    printf("MODE must be 1, 2, 3, 4, 5, 6, or 7.\n");
+  if (MODE < 1 || MODE > 8) {
+    printf("MODE must be 1, 2, 3, 4, 5, 6, 7, or 8.\n");
     exit(0);
   }
 
-  if ((MODE == 4 || MODE == 5 || MODE == 6) && argc != (NUM_ARGUMENTS_REQUIRED + 2)) {
-    printf("MODE 4/5/6 expects K as an extra parameter.\n");
+  if ((MODE == 4 || MODE == 5 || MODE == 6 || MODE == 8) && argc != (NUM_ARGUMENTS_REQUIRED + 2)) {
+    printf("MODE 4/5/6/8 expects K as an extra parameter.\n");
     exit(0);
   }
   if (MODE == 7 && argc != (NUM_ARGUMENTS_REQUIRED + 3)) {
     printf("MODE 7 expects K and NTHREADS as extra parameters.\n");
     exit(0);
   }
-  if (MODE != 4 && MODE != 5 && MODE != 6 && MODE != 7 && argc != (NUM_ARGUMENTS_REQUIRED + 1)) {
+  if (MODE != 4 && MODE != 5 && MODE != 6 && MODE != 7 && MODE != 8 && argc != (NUM_ARGUMENTS_REQUIRED + 1)) {
     printf("MODE 1/2/3 expects no K parameter.\n");
     exit(0);
   }
@@ -91,7 +92,7 @@ void parseCommandLineArguments(int argc, char *argv[]) {
   if (M == 0) {
     M = 1;
   }
-  if (MODE == 4 || MODE == 5 || MODE == 6) {
+  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 8) {
     K = atoi(argv[5]);
     REPEAT = atoi(argv[6]);
   } else if (MODE == 7) {
@@ -106,8 +107,8 @@ void parseCommandLineArguments(int argc, char *argv[]) {
 
   // To ignore the first iteration, we perform the experiment REPEAT + 1 times
   REPEAT = REPEAT + 1;
-  if ((MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7) && K == 0) {
-    printf("MODE 4/5/6/7 expects K > 0\n");
+  if ((MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8) && K == 0) {
+    printf("MODE 4/5/6/7/8 expects K > 0\n");
     exit(0);
   }
   if (MODE == 7 && NTHREADS == 0) {
@@ -136,6 +137,7 @@ int main(int argc, char *argv[]) {
   double ecall_time;
 
   bool verbose_phases = !!getenv("VERBOSE_PHASES");
+  const bool profile_online = !!getenv("ONLINE_PROFILE");
   uint64_t phase_start, phase_end;
   double phase_time;
 
@@ -163,6 +165,10 @@ int main(int argc, char *argv[]) {
   double ptime_array[REPEAT] = {};
   double gen_perm_time_array[REPEAT] = {};
   double apply_perm_time_array[REPEAT] = {};
+  double online_route_array[REPEAT] = {};
+  double online_reorder_array[REPEAT] = {};
+  double online_copy_array[REPEAT] = {};
+  double online_shuffle_array[REPEAT] = {};
   size_t num_oswaps[REPEAT] = {};
 
   OpenSSL_add_all_algorithms();   // Initialize libcrypto
@@ -221,7 +227,7 @@ int main(int argc, char *argv[]) {
 
   // Create buffer of items to shuffle
   size_t output_blocks = N;
-  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7) {
+  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8) {
     output_blocks = SampleSize * K;
   }
   size_t total_blocks = (output_blocks > N) ? output_blocks : N;
@@ -305,7 +311,8 @@ int main(int argc, char *argv[]) {
 
     process_start = rtclock();
 
-    enc_ret ret;
+    enc_ret ret{};
+    ret.collect_online_profile = profile_online && (MODE == 6 || MODE == 8);
     switch (MODE) {
       case 1:
         DecPSQF_single(buf, N, SampleSize, ENC_BLOCK_SIZE, buf, &ret);
@@ -366,6 +373,10 @@ int main(int argc, char *argv[]) {
         ptime_array[r] = ret.ptime;
         gen_perm_time_array[r] = ret.gen_perm_time;
         apply_perm_time_array[r] = ret.apply_perm_time;
+        online_route_array[r] = ret.online_route_ms;
+        online_reorder_array[r] = ret.online_reorder_ms;
+        online_copy_array[r] = ret.online_copy_ms;
+        online_shuffle_array[r] = ret.online_shuffle_ms;
       #ifdef COUNT_OSWAPS
         num_oswaps[r] = ret.OSWAP_count;
       #else
@@ -378,6 +389,22 @@ int main(int argc, char *argv[]) {
         ptime_array[r] = ret.ptime;
         gen_perm_time_array[r] = ret.gen_perm_time;
         apply_perm_time_array[r] = ret.apply_perm_time;
+      #ifdef COUNT_OSWAPS
+        num_oswaps[r] = ret.OSWAP_count;
+      #else
+        num_oswaps[r] = 0;
+      #endif
+        break;
+
+      case 8:
+        DecOFRSupple(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
+        ptime_array[r] = ret.ptime;
+        gen_perm_time_array[r] = ret.gen_perm_time;
+        apply_perm_time_array[r] = ret.apply_perm_time;
+        online_route_array[r] = ret.online_route_ms;
+        online_reorder_array[r] = ret.online_reorder_ms;
+        online_copy_array[r] = ret.online_copy_ms;
+        online_shuffle_array[r] = ret.online_shuffle_ms;
       #ifdef COUNT_OSWAPS
         num_oswaps[r] = ret.OSWAP_count;
       #else
@@ -404,7 +431,7 @@ int main(int argc, char *argv[]) {
     size_t output_blocks = N;
     if (MODE == 1 || MODE == 3) {
       output_blocks = SampleSize;
-    } else if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7) {
+    } else if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8) {
       output_blocks = SampleSize * K;
     }
     unsigned char *decrypted_result_buf_ptr = buf;
@@ -454,13 +481,22 @@ int main(int argc, char *argv[]) {
   printf("%f\n", ecallTime_average);
   printf("%f\n", ptime_average);
 
-  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7) {
+  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8) {
     double gen_perm_time_average = calculateAve(gen_perm_time_array + 1, REPEAT - 1);
     double apply_perm_time_average = calculateAve(apply_perm_time_array + 1, REPEAT - 1);
     printf("%f\n", gen_perm_time_average);
     printf("%f\n", apply_perm_time_average);
   }
   printf("%ld\n", num_oswaps[0]);
+  if (profile_online && (MODE == 6 || MODE == 8)) {
+    const double route = calculateAve(online_route_array + 1, REPEAT - 1);
+    const double reorder = calculateAve(online_reorder_array + 1, REPEAT - 1);
+    const double copy = calculateAve(online_copy_array + 1, REPEAT - 1);
+    const double shuffle = calculateAve(online_shuffle_array + 1, REPEAT - 1);
+    const double online = calculateAve(apply_perm_time_array + 1, REPEAT - 1);
+    printf("PROFILE,%f,%f,%f,%f,%f\n", route, reorder, copy, shuffle,
+           online - route - reorder - copy - shuffle);
+  }
 
   close(randfd);
 

@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import argparse
+from functools import lru_cache
 import math
 import os
 import subprocess
@@ -32,13 +33,13 @@ def available_cpu_count():
   return max(1, len(physical_cores))
 
 
-DEFAULT_MODE = [6]
+DEFAULT_MODE = [6, 8]
 DEFAULT_P = [0.015625]
-DEFAULT_N = [1048576]
-DEFAULT_K = [16, 64, 256]
+DEFAULT_N = [65536, 1048576]
+DEFAULT_K = [16, 64]
 DEFAULT_K_SELECT = 2   # 1 => k = 1/p, 2 => use --k list
-DEFAULT_BLOCK_SIZE = [16]
-DEFAULT_REPEAT = 2
+DEFAULT_BLOCK_SIZE = [16, 64]
+DEFAULT_REPEAT = 5
 DEFAULT_THREADS = 1 #available_cpu_count()
 
 BASE_HEAP = 1000000
@@ -53,6 +54,7 @@ MODE_INFO = {
   5: {"name": "SubSampleMulti_opt", "needs_k": True, "detailed": True, "fixed_k": False},
   6: {"name": "Supple", "needs_k": True, "detailed": True, "fixed_k": False},
   7: {"name": "Supple_parallel", "needs_k": True, "detailed": True, "fixed_k": False},
+  8: {"name": "OFRSupple", "needs_k": True, "detailed": True, "fixed_k": False},
 }
 
 
@@ -86,9 +88,9 @@ def parse_args():
   parser.add_argument("--modes", default=",".join(map(str, DEFAULT_MODE)), help="Comma-separated modes, e.g. 3,4")
   parser.add_argument("--n", default=",".join(map(str, DEFAULT_N)), help="Comma-separated N values")
   parser.add_argument("--p", default=",".join(map(str, DEFAULT_P)), help="Comma-separated P values (0 < P <= 1)")
-  parser.add_argument("--k", default=",".join(map(str, DEFAULT_K)), help="Comma-separated K values (used by modes 4/5/6/7)")
+  parser.add_argument("--k", default=",".join(map(str, DEFAULT_K)), help="Comma-separated K values (used by modes 4/5/6/7/8)")
   parser.add_argument("--k-select", type=int, choices=[1, 2], default=DEFAULT_K_SELECT,
-                      help="Modes 4/5/6/7 K selection: 1 => k=1/p, 2 => use --k list")
+                      help="Modes 4/5/6/7/8 K selection: 1 => k=1/p, 2 => use --k list")
   parser.add_argument("--block-sizes", default=",".join(map(str, DEFAULT_BLOCK_SIZE)), help="Comma-separated block sizes")
   parser.add_argument(
     "--repeat", type=int, default=DEFAULT_REPEAT,
@@ -133,6 +135,66 @@ def route_state_sizes(n, m, k):
   left_mask_words = (k_left + WORD_BITS - 1) // WORD_BITS
   right_mask_words = (k_right + WORD_BITS - 1) // WORD_BITS
   return mask_words, left_mask_words, right_mask_words
+
+
+@lru_cache(maxsize=None)
+def ofr_control_words(n, n_left, n_right):
+  """Mirror OFRControlCount: one byte is stored for each two-bit word."""
+  if n_left == 0 or n_right == 0:
+    return 0
+  if n == 2:
+    return 1
+  top_n = (n + 1) // 2
+  top_left = (n_left + 1) // 2
+  top_right = top_n - top_left
+  bottom_left = n_left - top_left
+  bottom_right = n_right - top_right
+  return (n // 2 +
+          ofr_control_words(top_n, top_left, top_right) +
+          ofr_control_words(n // 2, bottom_left, bottom_right))
+
+
+def ofrsupple_frontier(n, m, k):
+  nodes = [(0, k)]
+  v = 0
+  while v < len(nodes):
+    start, count = nodes[v]
+    if count == 1 or m * count <= n:
+      v += 1
+    else:
+      left = count // 2
+      nodes[v:v + 1] = [(start, left), (start + left, count - left)]
+  return tuple(nodes)
+
+
+def ofrsupple_control_counts(n, m, k):
+  """Mirror the two control counts in OFRSuppleControlCount."""
+  frontier = ofrsupple_frontier(n, m, k) if m * k > n else ()
+
+  @lru_cache(maxsize=None)
+  def count_node(items, samples, nodes):
+    if samples == 1:
+      return (items if items > m else 0, 0)
+    left_k = samples // 2
+    right_k = samples - left_k
+    if items == m * samples:
+      left_n = m * left_k
+      right_n = items - left_n
+      left = count_node(left_n, left_k, ())
+      right = count_node(right_n, right_k, ())
+      return (left[0] + right[0],
+              ofr_control_words(items, left_n, right_n) + left[1] + right[1])
+
+    children = nodes or ((0, left_k), (left_k, right_k))
+    swo_bits = ofr_words = 0
+    for _, child_k in children:
+      child_n = min(items, m * child_k)
+      child = count_node(child_n, child_k, ())
+      swo_bits += (items if child_n < items else 0) + child[0]
+      ofr_words += child[1]
+    return (swo_bits, ofr_words)
+
+  return count_node(n, k, frontier)
 
 
 def mode5_workspace_bytes(n, m, k, block_size):
@@ -206,6 +268,24 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=1):
       64 * 1024
     )
     heap_memory = int(math.ceil(heap_memory * 1.25))
+
+  elif mode == 8:
+    k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
+    mask_words = (k + WORD_BITS - 1) // WORD_BITS
+    swo_bits, ofr_words = ofrsupple_control_counts(n, m, k)
+    # Keep the raw OFR stream for the public write/read API and one prepared
+    # stream for the optimized online path. Public swap plans are shared by
+    # equal node shapes; allow room for their temporary construction as well.
+    control_bytes = (swo_bits + 7) // 8 + 2 * ofr_words
+    shape_bytes = 64 * n
+    mark_bytes = n * mask_words * SIZE_T_BYTES
+    result_bytes = m * k * block_size
+    # Offline routing keeps membership copies for active OFR ancestors.
+    offline_peak = control_bytes + shape_bytes + mark_bytes + 8 * mark_bytes + 2 * n
+    # Online routing keeps child data and output arrays across recursion.
+    online_peak = control_bytes + shape_bytes + result_bytes + 6 * n * block_size + 2 * n
+    heap_memory += max(offline_peak, online_peak) + 64 * 1024
+    heap_memory = int(math.ceil(heap_memory * 1.35))
 
   elif mode in (5, 6, 7):
     k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
@@ -288,7 +368,8 @@ def resolve_results_folder(raw_path):
 
 
 def parse_output(mode, output):
-  lines = [line.strip() for line in output.splitlines() if line.strip()]
+  lines = [line.strip() for line in output.splitlines()
+           if line.strip() and not line.startswith("PROFILE,")]
   expected = 5 if MODE_INFO[mode]["detailed"] else 3
   if len(lines) < expected:
     return None
@@ -371,7 +452,11 @@ def main():
             )
             heap_mb = float(heap_bytes) / (1024.0 * 1024.0)
 
-            subprocess.run(["make", "-C", str(PROJECT_DIR)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            build = subprocess.run(["make", "-C", str(PROJECT_DIR)],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if build.returncode != 0:
+              print("Build failed before experiment:", build.stderr.decode("utf-8", errors="ignore"))
+              return 1
             cmd = build_command(mode, n, block_size, p_rate, k_value, repeat, threads)
 
             if mode == 7:

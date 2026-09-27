@@ -1,15 +1,15 @@
 \begin{algorithm}[t]
-\caption{$\FMSControlBits(T)$}
-\label{alg:fms-control-bits}
+\caption{$\OFRControl(T)$}
+\label{alg:ofr-control}
 \begin{algorithmic}[1]
 \Require Secret routing-tag array $T$ of public length $n=2^h$
 \Ensure Control-word array $C$ containing one two-bit word for every
 $\mathsf{OFork}$ gate
 \State $n \gets |T|$
-\State $\ell_C \gets \FMSControlNum(n)$
+\State $\ell_C \gets \OFRControlCount(n)$
 \State Create array $C$ of length $\ell_C$
-\State $\widehat{T} \gets \TagNormalize(T)$
-\State $p \gets \FMSControlWrite(\widehat{T},C,0)$
+\State $\widehat{T} \gets \OFRNormalize(T)$
+\State $p \gets \OFRControlWrite(\widehat{T},C,0)$
 \State \textbf{assert} $p=\ell_C$
 \State \Return $C$
 \end{algorithmic}
@@ -17,8 +17,8 @@ $\mathsf{OFork}$ gate
 
 
 \begin{algorithm}[t]
-\caption{$\FMSControlNum(n)$}
-\label{alg:fms-control-num}
+\caption{$\OFRControlCount(n)$}
+\label{alg:ofr-control-count}
 \begin{algorithmic}[1]
 \Require Public node size $n=2^h$, where $n\geq 2$
 \Ensure Number $\ell$ of two-bit $\mathsf{OFork}$ control words
@@ -26,14 +26,14 @@ $\mathsf{OFork}$ gate
     \State \Return $1$
 \EndIf
 \State $\ell_g \gets n/2$
-\State $\ell_{\mathsf{sub}} \gets \FMSControlNum(\ell_g)$
+\State $\ell_{\mathsf{sub}} \gets \OFRControlCount(\ell_g)$
 \State \Return $\ell_g+2\ell_{\mathsf{sub}}$
 \end{algorithmic}
 \end{algorithm}
 
 \begin{algorithm}[t]
-\caption{$\FMSControlWrite(T,C,p)$}
-\label{alg:fms-control-write}
+\caption{$\OFRControlWrite(T,C,p)$}
+\label{alg:ofr-control-write}
 \begin{algorithmic}[1]
 \Require Normalized secret routing-tag array $T$ of public length
 $n=2^h$, where
@@ -48,18 +48,18 @@ global control array $C$, and public writing position $p$
 
 \State $\ell_g \gets n/2$
 \State $(C_{\mathsf{cur}},T_{\mathsf{top}},T_{\mathsf{bot}})
-       \gets \FMSBalance(T)$
+       \gets \OFRBalance(T)$
 \State $C[p:p+\ell_g) \gets C_{\mathsf{cur}}$
 \State $p \gets p+\ell_g$
-\State $p \gets \FMSControlWrite(T_{\mathsf{top}},C,p)$
-\State $p \gets \FMSControlWrite(T_{\mathsf{bot}},C,p)$
+\State $p \gets \OFRControlWrite(T_{\mathsf{top}},C,p)$
+\State $p \gets \OFRControlWrite(T_{\mathsf{bot}},C,p)$
 \State \Return $p$
 \end{algorithmic}
 \end{algorithm}
 
 \begin{algorithm}[t]
 \caption{$\OForkControl(x,y,t_{\mathsf{top}},t_{\mathsf{bot}})$}
-\label{alg:fms-choose-ofork-control}
+\label{alg:ofr-choose-ofork-control}
 \begin{algorithmic}[1]
 \Require Input tags $x,y$ and desired secret output tags $t_{\mathsf{top}},t_{\mathsf{bot}}$
 \Ensure A two-bit $\OFork$ control word $c$
@@ -111,8 +111,8 @@ global control array $C$, and public writing position $p$
 
 
 \begin{algorithm}[t]
-\caption{$\TagNormalize(T)$}
-\label{alg:fms-normalize-tags}
+\caption{$\OFRNormalize(T)$}
+\label{alg:ofr-normalize}
 \begin{algorithmic}[1]
 \Require Secret routing-tag array $T$ of public length $n=2^h$,
 where $\sum_{i=0}^{n-1} T[i][0]\leq n/2$ and $\sum_{i=0}^{n-1} T[i][1]\leq n/2 $
@@ -166,8 +166,8 @@ and every nonzero input tag remains unchanged
 
 
 \begin{algorithm}[t]
-\caption{$\TagPairMask(x,y)$}
-\label{alg:fms-type-masks}
+\caption{$\OFRPairMask(x,y)$}
+\label{alg:ofr-pair-mask}
 \begin{algorithmic}[1]
 \Require Two secret routing tags $x$ and $y$
 \Ensure A one-hot array $M\in\{0,1\}^{10}$ for the unordered tag-pair types
@@ -279,8 +279,8 @@ $\{\TRight,\TBoth\}$, and $\{\TBoth,\TBoth\}$, in this order
 
 
 \begin{algorithm}[t]
-\caption{$\FMSBalance(T)$}
-\label{alg:fms-balance-layer}
+\caption{$\OFRBalance(T)$}
+\label{alg:ofr-balance-layer}
 \begin{algorithmic}[1]
 \Require Secret routing-tag array $T$ of public length $n\geq 4$,
 where $\sum_i T[i][0]=\sum_i T[i][1]=n/2$
@@ -295,7 +295,7 @@ $T_{\mathsf{top}}$ and $T_{\mathsf{bot}}$
 
 \For{$i \gets 0\dots \ell_g-1$}
     \State $x \gets T[2i]$, $y \gets T[2i+1]$
-    \State $M \gets \TagPairMask(x,y)$
+    \State $M \gets \OFRPairMask(x,y)$
     \For{$j \gets 0\dots 9$}
         \State $H[j] \gets H[j]+M[j]$
     \EndFor
@@ -318,7 +318,7 @@ $T_{\mathsf{top}}$ and $T_{\mathsf{bot}}$
 
 \For{$i \gets 0\dots \ell_g-1$}
     \State $x \gets T[2i]$, $y \gets T[2i+1]$
-    \State $M \gets \TagPairMask(x,y)$
+    \State $M \gets \OFRPairMask(x,y)$
 
     \State $\mathsf{is}_D \gets
            M[5]\land\LDBracket r_D<q_D\RDBracket$
@@ -360,8 +360,8 @@ $T_{\mathsf{top}}$ and $T_{\mathsf{bot}}$
 
 
 \begin{algorithm}[t]
-\caption{$\FMSApply(D,C,p)$}
-\label{alg:fms-apply}
+\caption{$\OFRApply(D,C,p)$}
+\label{alg:ofr-apply}
 \begin{algorithmic}[1]
 \Require Current data array $D$ of public length $n=2^h$,
 global control-word array $C$, and public reading position $p$
@@ -389,9 +389,9 @@ and next unread position $p$ in $C$
 \State $p\gets p+\ell_g$
 
 \State $(A_L,A_R,p)\gets
-       \FMSApply(D_{\mathsf{top}},C,p)$
+       \OFRApply(D_{\mathsf{top}},C,p)$
 \State $(B_L,B_R,p)\gets
-       \FMSApply(D_{\mathsf{bot}},C,p)$
+       \OFRApply(D_{\mathsf{bot}},C,p)$
 
 \State $D_L\gets A_L\parallel B_L$
 \State $D_R\gets A_R\parallel B_R$

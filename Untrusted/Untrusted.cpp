@@ -1,7 +1,7 @@
 
 
 #include "Untrusted.h"
-#include "FMSCompact.hpp"
+#include "OFRCompact.hpp"
 
 struct timespec start, stop;
 double elapsed;
@@ -483,6 +483,11 @@ void DecSuppleSWO_parallel(unsigned char *encrypted_buffer, size_t N, size_t M, 
   DecSuppleSWO_parallel(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret, nthreads);
 }
 
+void DecOFRSupple(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size,
+  unsigned char *encrypt_result_buffer, enc_ret *ret) {
+  DecOFRSupple(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret);
+}
+
 void RecursiveShuffle_M1(unsigned char *buf, uint64_t N, size_t block_size) {
   RecursiveShuffle_M1(global_eid, buf, N, block_size);
 }
@@ -529,7 +534,7 @@ double MeasureObliviousPrimitive(unsigned char *buf,
   return elapsed_us;
 }
 
-int FMSCompactPrepare(const uint8_t *routing_tags,
+int OFRCompactPrepare(const uint8_t *routing_tags,
                       size_t n,
                       size_t n_left,
                       size_t n_right,
@@ -541,7 +546,7 @@ int FMSCompactPrepare(const uint8_t *routing_tags,
   }
 
   int result = -1;
-  sgx_status_t status = ::FMSCompactPrepare(
+  sgx_status_t status = ::OFRCompactPrepare(
       global_eid,
       &result,
       const_cast<uint8_t *>(routing_tags),
@@ -557,11 +562,11 @@ int FMSCompactPrepare(const uint8_t *routing_tags,
   return result;
 }
 
-double FMSCompactOnline(unsigned char *buffer,
+double OFRCompactOnline(unsigned char *buffer,
                         size_t n,
                         size_t block_size) {
   double elapsed_us = -1.0;
-  sgx_status_t status = ::FMSCompactOnline(
+  sgx_status_t status = ::OFRCompactOnline(
       global_eid, &elapsed_us, buffer, n, block_size);
   if (status != SGX_SUCCESS) {
     print_error_message(status);
@@ -587,8 +592,8 @@ double OCompactOnline(unsigned char *buffer,
   return elapsed_us;
 }
 
-void FMSCompactRelease(void) {
-  sgx_status_t status = ::FMSCompactRelease(global_eid);
+void OFRCompactRelease(void) {
+  sgx_status_t status = ::OFRCompactRelease(global_eid);
   if (status != SGX_SUCCESS) {
     print_error_message(status);
   }

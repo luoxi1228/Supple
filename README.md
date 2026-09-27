@@ -72,6 +72,18 @@ From the project root:
     --overwrite
 ```
 
+To compare the online phases of Supple and OFRSupple at one configuration:
+
+```bash
+./run_experiments.py --modes 6,8 --n 65536 --p 0.015625 \
+    --k 64 --k-select 2 --block-sizes 64 --repeat 5 --overwrite
+```
+
+The `apply_perm(online)` column is the enclave's online timing in milliseconds.
+For a route, reorder, copy, and Shuffle breakdown, see
+`RESULTS/ofrsupple_online_prepared.md`; the paired SIM benchmark supports
+`--profile` and writes those measurements to separate CSV columns.
+
 ### CLI Parameters (`run_experiments.py`)
 
 - `--modes`: comma-separated mode list
@@ -93,10 +105,11 @@ From the project root:
 - `5`: SubSampleMulti_opt
 - `6`: Supple
 - `7`: Supple_parallel
+- `8`: OFRSupple
 
 ### `k` Selection Behavior
 
-- Modes `4`, `5`, `6`, and `7`:
+- Modes `4`, `5`, `6`, `7`, and `8`:
     - `k-select=1`: use derived `k = max(1, int(1/p))`
     - `k-select=2`: sweep values from `--k`
 - Mode `2`: always uses `k = max(1, int(1/p))`
@@ -117,6 +130,7 @@ Each mode is appended to one headerless CSV file:
 - `<RESULTS_FOLDER>/SubSampleMulti_opt.csv`
 - `<RESULTS_FOLDER>/Supple.csv`
 - `<RESULTS_FOLDER>/Supple_parallel.csv`
+- `<RESULTS_FOLDER>/OFRSupple.csv`
 
 
 ## 3.1 Common Prefix Columns
@@ -131,7 +145,7 @@ Columns:
 
 `block_size, p, n, k, ecall_time, ptime, oswaps, heap_est_mb`
 
-## 3.3 Mode 4/5/6/7
+## 3.3 Mode 4/5/6/7/8
 
 Columns:
 

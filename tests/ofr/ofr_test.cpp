@@ -9,10 +9,10 @@
 #include <stdexcept>
 #include <vector>
 
-#include "../../Enclave/SubSample_v2/FMS/helper.cpp"
-#include "../../Enclave/SubSample_v2/FMS/FMS.cpp"
+#include "../../Enclave/SubSample_v2/OFR/helper.cpp"
+#include "../../Enclave/SubSample_v2/OFR/OFR.cpp"
 
-using namespace fms;
+using namespace ofr;
 
 static size_t exact_cases = 0;
 static size_t normalize_cases = 0;
@@ -55,7 +55,7 @@ static std::vector<uint32_t> Expected(const std::vector<uint8_t> &tags,
   return ids;
 }
 
-static void CheckOutput(const FMSDataResult &output,
+static void CheckOutput(const OFRDataResult &output,
                         const std::vector<uint8_t> &normalized,
                         size_t width)
 {
@@ -70,17 +70,17 @@ static void Verify(const std::vector<uint8_t> &tags,
                    bool check_compact)
 {
   const size_t n = tags.size();
-  const std::vector<uint8_t> normalized = FMSNormalize(
+  const std::vector<uint8_t> normalized = OFRNormalize(
       tags, n, n_left, n_right);
-  const size_t control_count = FMSControlCount(n, n_left, n_right);
-  const std::vector<uint8_t> controls = FMSControl(
+  const size_t control_count = OFRControlCount(n, n_left, n_right);
+  const std::vector<uint8_t> controls = OFRControl(
       tags, n, n_left, n_right);
   assert(controls.size() == control_count);
 
   const size_t offset = 3 + (exact_cases + normalize_cases) % 5;
-  std::vector<uint8_t> shared(offset + control_count + 4, FMS_COPY_SECOND);
+  std::vector<uint8_t> shared(offset + control_count + 4, OFR_COPY_SECOND);
   const std::vector<uint8_t> before = shared;
-  const size_t next = FMSControlWrite(normalized,
+  const size_t next = OFRControlWrite(normalized,
                                       shared,
                                       n,
                                       n_left,
@@ -97,12 +97,12 @@ static void Verify(const std::vector<uint8_t> &tags,
 
   const std::vector<unsigned char> data = Records(n, width);
   const std::vector<unsigned char> saved = data;
-  const FMSDataResult applied = FMSApply(
+  const OFRDataResult applied = OFRApply(
       data.data(), controls, n, n_left, n_right, width);
   CheckOutput(applied, normalized, width);
   assert(data == saved);
 
-  const FMSControlReadResult read = FMSControlRead(
+  const OFRControlReadResult read = OFRControlRead(
       data.data(), shared, n, n_left, n_right, width, offset);
   assert(read.next_pos == next);
   assert(read.left == applied.left && read.right == applied.right);
@@ -110,9 +110,9 @@ static void Verify(const std::vector<uint8_t> &tags,
   if (check_compact)
   {
     std::vector<unsigned char> in_place = data;
-    const std::vector<FMSOutputSwap> output_swaps =
-        FMSOutputSwaps(n, n_left, n_right);
-    FMSApplyInPlace(in_place.data(), controls, output_swaps,
+    const std::vector<OFROutputSwap> output_swaps =
+        OFROutputSwaps(n, n_left, n_right);
+    OFRApplyInPlace(in_place.data(), controls, output_swaps,
                     n, n_left, n_right, width);
     assert(std::equal(applied.left.begin(), applied.left.end(),
                       in_place.begin()));
@@ -120,61 +120,61 @@ static void Verify(const std::vector<uint8_t> &tags,
                       in_place.begin() + applied.left.size()));
 
     std::vector<unsigned char> split_timing = data;
-    FMSApplyInPlace(split_timing.data(), controls, output_swaps,
+    OFRApplyInPlace(split_timing.data(), controls, output_swaps,
                     n, n_left, n_right, width, false);
-    FMSApplyOutputSwapsInPlace(
+    OFRApplyOutputSwapsInPlace(
         split_timing.data(), n, width, output_swaps);
     assert(split_timing == in_place);
 
     std::vector<unsigned char> prepared = data;
-    FMSApplyPreparedInPlace(prepared.data(), controls, output_swaps,
+    OFRApplyPreparedInPlace(prepared.data(), controls, output_swaps,
                             n, n_left, n_right, width, false);
-    FMSApplyOutputSwapsInPlace(prepared.data(), n, width, output_swaps);
+    OFRApplyOutputSwapsInPlace(prepared.data(), n, width, output_swaps);
     assert(prepared == in_place);
 
     if (n >= 2 && (n & (n - 1)) == 0 && n_left == n / 2)
     {
       std::vector<unsigned char> level_ordered = data;
       const std::vector<uint8_t> level_controls =
-          FMSLevelOrderControls(controls, n, n_left, n_right);
-      FMSApplyLevelOrderedInPlace(level_ordered.data(), level_controls,
+          OFRLevelOrderControls(controls, n, n_left, n_right);
+      OFRApplyLevelOrderedInPlace(level_ordered.data(), level_controls,
                                   output_swaps, n, n_left, n_right, width);
       assert(level_ordered == in_place);
 
       std::vector<unsigned char> level_split_timing = data;
-      FMSApplyLevelOrderedInPlace(level_split_timing.data(), level_controls,
+      OFRApplyLevelOrderedInPlace(level_split_timing.data(), level_controls,
                                   output_swaps, n, n_left, n_right, width,
                                   false);
-      FMSApplyOutputSwapsInPlace(
+      OFRApplyOutputSwapsInPlace(
           level_split_timing.data(), n, width, output_swaps);
       assert(level_split_timing == level_ordered);
 
       std::vector<unsigned char> prepared_level = data;
-      FMSApplyPreparedLevelOrderedInPlace(
+      OFRApplyPreparedLevelOrderedInPlace(
           prepared_level.data(), level_controls, output_swaps,
           n, n_left, n_right, width, false);
-      FMSApplyOutputSwapsInPlace(
+      OFRApplyOutputSwapsInPlace(
           prepared_level.data(), n, width, output_swaps);
       assert(prepared_level == level_ordered);
 
       const std::vector<uint8_t> postorder_controls =
-          FMSPostOrderControls(controls, n, n_left, n_right);
+          OFRPostOrderControls(controls, n, n_left, n_right);
       assert(postorder_controls.size() == controls.size());
       std::vector<unsigned char> postordered = data;
-      FMSApplyPostOrderInPlace(postordered.data(), postorder_controls,
+      OFRApplyPostOrderInPlace(postordered.data(), postorder_controls,
                                output_swaps, n, n_left, n_right, width);
       assert(postordered == in_place);
 
       std::vector<unsigned char> prepared_postorder = data;
-      FMSApplyPreparedPostOrderInPlace(
+      OFRApplyPreparedPostOrderInPlace(
           prepared_postorder.data(), postorder_controls, output_swaps,
           n, n_left, n_right, width, false);
-      FMSApplyOutputSwapsInPlace(
+      OFRApplyOutputSwapsInPlace(
           prepared_postorder.data(), n, width, output_swaps);
       assert(prepared_postorder == in_place);
     }
 
-    const FMSDataResult compacted = FMSCompact(
+    const OFRDataResult compacted = OFRCompact(
         data.data(), tags, n, n_left, n_right, width);
     assert(compacted.left == applied.left && compacted.right == applied.right);
   }
@@ -265,13 +265,13 @@ static void RandomLarge()
       std::vector<size_t> order(n);
       for (size_t i = 0; i < n; ++i)
         order[i] = i;
-      std::vector<uint8_t> tags(n, FMS_TAG_ZERO);
+      std::vector<uint8_t> tags(n, OFR_TAG_ZERO);
       std::shuffle(order.begin(), order.end(), random);
       for (size_t i = 0; i < n_left; ++i)
-        tags[order[i]] = static_cast<uint8_t>(tags[order[i]] | FMS_TAG_LEFT);
+        tags[order[i]] = static_cast<uint8_t>(tags[order[i]] | OFR_TAG_LEFT);
       std::shuffle(order.begin(), order.end(), random);
       for (size_t i = 0; i < n_right; ++i)
-        tags[order[i]] = static_cast<uint8_t>(tags[order[i]] | FMS_TAG_RIGHT);
+        tags[order[i]] = static_cast<uint8_t>(tags[order[i]] | OFR_TAG_RIGHT);
       Verify(tags,
              n_left,
              n_right,
@@ -290,12 +290,12 @@ static void BalancedPostOrder()
   {
     for (size_t width : widths)
     {
-      std::vector<uint8_t> tags(n, FMS_TAG_ZERO);
+      std::vector<uint8_t> tags(n, OFR_TAG_ZERO);
       for (size_t i = 0; i < n / 4; ++i)
       {
-        tags[i] = FMS_TAG_BOTH;
-        tags[n / 4 + i] = FMS_TAG_LEFT;
-        tags[n / 2 + i] = FMS_TAG_RIGHT;
+        tags[i] = OFR_TAG_BOTH;
+        tags[n / 4 + i] = OFR_TAG_LEFT;
+        tags[n / 2 + i] = OFR_TAG_RIGHT;
       }
       std::shuffle(tags.begin(), tags.end(), random);
       Verify(tags, n / 2, n / 2, width, true);
@@ -307,31 +307,31 @@ static void CheckHelpersAndErrors()
 {
   size_t pair_index = 0;
   const uint8_t tag_order[] = {
-      FMS_TAG_ZERO, FMS_TAG_LEFT, FMS_TAG_RIGHT, FMS_TAG_BOTH};
+      OFR_TAG_ZERO, OFR_TAG_LEFT, OFR_TAG_RIGHT, OFR_TAG_BOTH};
   for (size_t x_index = 0; x_index < 4; ++x_index)
   {
     for (size_t y_index = x_index; y_index < 4; ++y_index, ++pair_index)
     {
       const uint8_t x = tag_order[x_index];
       const uint8_t y = tag_order[y_index];
-      const std::array<uint8_t, 10> pair = FMSPairMask(x, y);
+      const std::array<uint8_t, 10> pair = OFRPairMask(x, y);
       assert(std::count(pair.begin(), pair.end(), uint8_t(1)) == 1);
       assert(pair[pair_index] == 1);
     }
   }
 
-  assert(FMSControlCount(3, 2, 1) == 2);
-  assert(FMSControlCount(4, 1, 3) == 3);
-  assert(FMSControlCount(4, 2, 2) == 4);
-  assert(FMSControlCount(6, 3, 3) == 7);
-  assert(FMSControlCount(9, 3, 6) == 12);
-  assert(FMSControlCount(12, 6, 6) == 20);
-  assert(FMSControlCount(1024, 0, 1024) == 0);
+  assert(OFRControlCount(3, 2, 1) == 2);
+  assert(OFRControlCount(4, 1, 3) == 3);
+  assert(OFRControlCount(4, 2, 2) == 4);
+  assert(OFRControlCount(6, 3, 3) == 7);
+  assert(OFRControlCount(9, 3, 6) == 12);
+  assert(OFRControlCount(12, 6, 6) == 20);
+  assert(OFRControlCount(1024, 0, 1024) == 0);
 
   bool threw = false;
   try
   {
-    FMSControlCount(0, 0, 0);
+    OFRControlCount(0, 0, 0);
   }
   catch (const std::invalid_argument &)
   {
@@ -342,7 +342,7 @@ static void CheckHelpersAndErrors()
   threw = false;
   try
   {
-    FMSControl(std::vector<uint8_t>(3, FMS_TAG_BOTH), 3, 1, 2);
+    OFRControl(std::vector<uint8_t>(3, OFR_TAG_BOTH), 3, 1, 2);
   }
   catch (const std::invalid_argument &)
   {
@@ -355,14 +355,14 @@ static void CheckPublishedExamples()
 {
   {
     // A-L; left is ABC U ADE, right is AFG U FHI. The two padding records
-    // follow FMSNormalize's deterministic zero-tag assignment.
+    // follow OFRNormalize's deterministic zero-tag assignment.
     const size_t n = 12;
-    std::vector<uint8_t> tags(n, FMS_TAG_ZERO);
+    std::vector<uint8_t> tags(n, OFR_TAG_ZERO);
     for (size_t id : {size_t(0), size_t(1), size_t(2), size_t(3), size_t(4)})
-      tags[id] = static_cast<uint8_t>(tags[id] | FMS_TAG_LEFT);
+      tags[id] = static_cast<uint8_t>(tags[id] | OFR_TAG_LEFT);
     for (size_t id : {size_t(0), size_t(5), size_t(6), size_t(7), size_t(8)})
-      tags[id] = static_cast<uint8_t>(tags[id] | FMS_TAG_RIGHT);
-    const FMSDataResult output = FMSCompact(
+      tags[id] = static_cast<uint8_t>(tags[id] | OFR_TAG_RIGHT);
+    const OFRDataResult output = OFRCompact(
         Records(n, 4).data(), tags, n, 6, 6, 4);
     const std::vector<uint32_t> expected_left = {0, 4, 2, 9, 1, 3};
     const std::vector<uint32_t> expected_right = {0, 8, 6, 5, 10, 7};
@@ -377,12 +377,12 @@ static void CheckPublishedExamples()
   {
     // A-I; left is ACI, right is ADE U FHI.
     const size_t n = 9;
-    std::vector<uint8_t> tags(n, FMS_TAG_ZERO);
+    std::vector<uint8_t> tags(n, OFR_TAG_ZERO);
     for (size_t id : {size_t(0), size_t(2), size_t(8)})
-      tags[id] = static_cast<uint8_t>(tags[id] | FMS_TAG_LEFT);
+      tags[id] = static_cast<uint8_t>(tags[id] | OFR_TAG_LEFT);
     for (size_t id : {size_t(0), size_t(3), size_t(4), size_t(5), size_t(7), size_t(8)})
-      tags[id] = static_cast<uint8_t>(tags[id] | FMS_TAG_RIGHT);
-    const FMSDataResult output = FMSCompact(
+      tags[id] = static_cast<uint8_t>(tags[id] | OFR_TAG_RIGHT);
+    const OFRDataResult output = OFRCompact(
         Records(n, 4).data(), tags, n, 3, 6, 4);
     const std::vector<uint32_t> expected_left = {8, 0, 2};
     const std::vector<uint32_t> expected_right = {8, 3, 4, 5, 0, 7};

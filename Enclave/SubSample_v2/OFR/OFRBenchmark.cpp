@@ -1,4 +1,4 @@
-#include "FMS.hpp"
+#include "OFR.hpp"
 
 #include "Enclave_t.h"
 #include "../../ObliviousPrimitives.hpp"
@@ -12,13 +12,13 @@
 namespace
 {
 
-std::vector<uint8_t> g_fms_controls;
-std::vector<fms::FMSOutputSwap> g_fms_output_swaps;
+std::vector<uint8_t> g_ofr_controls;
+std::vector<ofr::OFROutputSwap> g_ofr_output_swaps;
 bool *g_ocompact_selected = NULL;
-size_t g_fms_n = 0;
-size_t g_fms_n_left = 0;
-size_t g_fms_n_right = 0;
-bool g_fms_postordered = false;
+size_t g_ofr_n = 0;
+size_t g_ofr_n_left = 0;
+size_t g_ofr_n_right = 0;
+bool g_ofr_postordered = false;
 
 bool MulOverflow(size_t lhs, size_t rhs, size_t *result)
 {
@@ -51,17 +51,17 @@ void ReleaseBenchmarkContext()
 {
   delete[] g_ocompact_selected;
   g_ocompact_selected = NULL;
-  g_fms_n = 0;
-  g_fms_n_left = 0;
-  g_fms_n_right = 0;
-  g_fms_postordered = false;
-  std::vector<uint8_t>().swap(g_fms_controls);
-  std::vector<fms::FMSOutputSwap>().swap(g_fms_output_swaps);
+  g_ofr_n = 0;
+  g_ofr_n_left = 0;
+  g_ofr_n_right = 0;
+  g_ofr_postordered = false;
+  std::vector<uint8_t>().swap(g_ofr_controls);
+  std::vector<ofr::OFROutputSwap>().swap(g_ofr_output_swaps);
 }
 
 } // namespace
 
-extern "C" int FMSCompactPrepare(uint8_t *routing_tags,
+extern "C" int OFRCompactPrepare(uint8_t *routing_tags,
                                   size_t n,
                                   size_t n_left,
                                   size_t n_right,
@@ -78,35 +78,35 @@ extern "C" int FMSCompactPrepare(uint8_t *routing_tags,
     long start_time = 0;
     long stop_time = 0;
     ocall_clock(&start_time);
-    std::vector<uint8_t> controls = fms::FMSControl(
+    std::vector<uint8_t> controls = ofr::OFRControl(
         tags, n, n_left, n_right);
-    std::vector<fms::FMSOutputSwap> output_swaps =
-        fms::FMSOutputSwaps(n, n_left, n_right);
+    std::vector<ofr::OFROutputSwap> output_swaps =
+        ofr::OFROutputSwaps(n, n_left, n_right);
     const bool postordered = n >= 2 && (n & (n - 1)) == 0 &&
                              n_left == n / 2 && n_right == n / 2;
     if (postordered)
     {
       std::vector<uint8_t> postorder_controls =
-          fms::FMSPostOrderControls(controls, n, n_left, n_right);
+          ofr::OFRPostOrderControls(controls, n, n_left, n_right);
       controls.swap(postorder_controls);
     }
     ocall_clock(&stop_time);
 
-    const std::vector<uint8_t> normalized = fms::FMSNormalize(
+    const std::vector<uint8_t> normalized = ofr::OFRNormalize(
         tags, n, n_left, n_right);
     bool *selected = new bool[n];
     for (size_t i = 0; i < n; ++i)
       selected[i] = ((normalized[i] >> 1U) & 1U) != 0;
 
     ReleaseBenchmarkContext();
-    g_fms_controls.swap(controls);
-    g_fms_output_swaps.swap(output_swaps);
+    g_ofr_controls.swap(controls);
+    g_ofr_output_swaps.swap(output_swaps);
     g_ocompact_selected = selected;
-    g_fms_n = n;
-    g_fms_n_left = n_left;
-    g_fms_n_right = n_right;
-    g_fms_postordered = postordered;
-    *control_words = g_fms_controls.size();
+    g_ofr_n = n;
+    g_ofr_n_left = n_left;
+    g_ofr_n_right = n_right;
+    g_ofr_postordered = postordered;
+    *control_words = g_ofr_controls.size();
     *control_us = static_cast<double>(stop_time - start_time);
     return 0;
   }
@@ -120,11 +120,11 @@ extern "C" int FMSCompactPrepare(uint8_t *routing_tags,
   }
 }
 
-extern "C" double FMSCompactOnline(unsigned char *buffer,
+extern "C" double OFRCompactOnline(unsigned char *buffer,
                                     size_t n,
                                     size_t block_size)
 {
-  if (n != g_fms_n || block_size == 0 ||
+  if (n != g_ofr_n || block_size == 0 ||
       !IsOutsideBuffer(buffer, n, block_size))
     return -1.0;
 
@@ -133,19 +133,19 @@ extern "C" double FMSCompactOnline(unsigned char *buffer,
     long start_time = 0;
     long stop_time = 0;
     ocall_clock(&start_time);
-    if (g_fms_postordered)
-      fms::FMSApplyPreparedPostOrderInPlace(
-          buffer, g_fms_controls, g_fms_output_swaps,
-          n, g_fms_n_left, g_fms_n_right, block_size, false);
+    if (g_ofr_postordered)
+      ofr::OFRApplyPreparedPostOrderInPlace(
+          buffer, g_ofr_controls, g_ofr_output_swaps,
+          n, g_ofr_n_left, g_ofr_n_right, block_size, false);
     else
-      fms::FMSApplyPreparedInPlace(
-          buffer, g_fms_controls, g_fms_output_swaps,
-          n, g_fms_n_left, g_fms_n_right, block_size, false);
+      ofr::OFRApplyPreparedInPlace(
+          buffer, g_ofr_controls, g_ofr_output_swaps,
+          n, g_ofr_n_left, g_ofr_n_right, block_size, false);
     ocall_clock(&stop_time);
 
     // Keep the final output identical, but exclude output swaps from the timer.
-    fms::FMSApplyOutputSwapsInPlace(
-        buffer, n, block_size, g_fms_output_swaps);
+    ofr::OFRApplyOutputSwapsInPlace(
+        buffer, n, block_size, g_ofr_output_swaps);
     return static_cast<double>(stop_time - start_time);
   }
   catch (...)
@@ -158,7 +158,7 @@ extern "C" double OCompactOnline(unsigned char *buffer,
                                   size_t n,
                                   size_t block_size)
 {
-  if (n != g_fms_n || g_ocompact_selected == NULL ||
+  if (n != g_ofr_n || g_ocompact_selected == NULL ||
       !SupportedOCompactBlockSize(block_size) ||
       !IsOutsideBuffer(buffer, n, block_size))
     return -1.0;
@@ -171,7 +171,7 @@ extern "C" double OCompactOnline(unsigned char *buffer,
   return static_cast<double>(stop_time - start_time);
 }
 
-extern "C" void FMSCompactRelease(void)
+extern "C" void OFRCompactRelease(void)
 {
   ReleaseBenchmarkContext();
 }

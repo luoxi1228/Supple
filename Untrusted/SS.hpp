@@ -15,4 +15,6 @@ void DecSuppleSWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K,
 
 void DecSuppleSWO_parallel(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size, unsigned char *encrypt_result_buffer, enc_ret *ret, size_t nthreads);
 
+void DecOFRSupple(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size, unsigned char *encrypt_result_buffer, enc_ret *ret);
+
 #endif

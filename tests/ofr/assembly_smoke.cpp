@@ -3,11 +3,11 @@
 #include <cstring>
 #include <vector>
 
-#include "../../Enclave/SubSample_v2/FMS/FMS.hpp"
+#include "../../Enclave/SubSample_v2/OFR/OFR.hpp"
 
 thread_local uint64_t OSWAP_COUNTER = 0;
 
-using namespace fms;
+using namespace ofr;
 
 static uint32_t ReadId(const std::vector<unsigned char> &data)
 {
@@ -34,7 +34,7 @@ static void Check(size_t width,
   std::memcpy(data.data(), &first, sizeof(first));
   std::memcpy(data.data() + width, &second, sizeof(second));
 
-  const FMSDataResult output = FMSCompact(
+  const OFRDataResult output = OFRCompact(
       data.data(), {first_tag, second_tag}, 2, 1, 1, width);
   assert(ReadId(output.left) == expected_left);
   assert(ReadId(output.right) == expected_right);
@@ -48,23 +48,23 @@ static void CheckLevelOrdered(size_t width)
 {
   const size_t n = 8;
   const std::vector<uint8_t> tags = {
-      FMS_TAG_LEFT, FMS_TAG_BOTH, FMS_TAG_ZERO, FMS_TAG_RIGHT,
-      FMS_TAG_BOTH, FMS_TAG_ZERO, FMS_TAG_LEFT, FMS_TAG_RIGHT};
+      OFR_TAG_LEFT, OFR_TAG_BOTH, OFR_TAG_ZERO, OFR_TAG_RIGHT,
+      OFR_TAG_BOTH, OFR_TAG_ZERO, OFR_TAG_LEFT, OFR_TAG_RIGHT};
   std::vector<unsigned char> data(n * width);
   for (size_t i = 0; i < n; ++i)
   {
     const uint32_t id = static_cast<uint32_t>(i);
     std::memcpy(data.data() + i * width, &id, sizeof(id));
   }
-  const FMSDataResult expected = FMSCompact(
+  const OFRDataResult expected = OFRCompact(
       data.data(), tags, n, n / 2, n / 2, width);
-  const std::vector<uint8_t> controls = FMSControl(
+  const std::vector<uint8_t> controls = OFRControl(
       tags, n, n / 2, n / 2);
-  const std::vector<uint8_t> level_controls = FMSLevelOrderControls(
+  const std::vector<uint8_t> level_controls = OFRLevelOrderControls(
       controls, n, n / 2, n / 2);
-  const std::vector<FMSOutputSwap> output_swaps = FMSOutputSwaps(
+  const std::vector<OFROutputSwap> output_swaps = OFROutputSwaps(
       n, n / 2, n / 2);
-  FMSApplyLevelOrderedInPlace(data.data(), level_controls, output_swaps,
+  OFRApplyLevelOrderedInPlace(data.data(), level_controls, output_swaps,
                               n, n / 2, n / 2, width);
   assert(std::memcmp(data.data(), expected.left.data(),
                      expected.left.size()) == 0);
@@ -77,9 +77,9 @@ static void CheckLevelOrdered(size_t width)
     const uint32_t id = static_cast<uint32_t>(i);
     std::memcpy(postordered.data() + i * width, &id, sizeof(id));
   }
-  const std::vector<uint8_t> postorder_controls = FMSPostOrderControls(
+  const std::vector<uint8_t> postorder_controls = OFRPostOrderControls(
       controls, n, n / 2, n / 2);
-  FMSApplyPreparedPostOrderInPlace(
+  OFRApplyPreparedPostOrderInPlace(
       postordered.data(), postorder_controls, output_swaps,
       n, n / 2, n / 2, width);
   assert(postordered == data);
@@ -90,10 +90,10 @@ int main()
   const size_t widths[] = {4, 7, 8, 12, 16, 24, 32, 40, 64};
   for (size_t width : widths)
   {
-    Check(width, FMS_TAG_LEFT, FMS_TAG_RIGHT, 0, 1);
-    Check(width, FMS_TAG_RIGHT, FMS_TAG_LEFT, 1, 0);
-    Check(width, FMS_TAG_BOTH, FMS_TAG_ZERO, 0, 0);
-    Check(width, FMS_TAG_ZERO, FMS_TAG_BOTH, 1, 1);
+    Check(width, OFR_TAG_LEFT, OFR_TAG_RIGHT, 0, 1);
+    Check(width, OFR_TAG_RIGHT, OFR_TAG_LEFT, 1, 0);
+    Check(width, OFR_TAG_BOTH, OFR_TAG_ZERO, 0, 0);
+    Check(width, OFR_TAG_ZERO, OFR_TAG_BOTH, 1, 1);
     CheckLevelOrdered(width);
   }
 }

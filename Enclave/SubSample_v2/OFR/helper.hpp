@@ -1,11 +1,11 @@
-#ifndef SUPPLE_FMS_HELPER_HPP
-#define SUPPLE_FMS_HELPER_HPP
+#ifndef SUPPLE_OFR_HELPER_HPP
+#define SUPPLE_OFR_HELPER_HPP
 
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
-namespace fms
+namespace ofr
 {
 namespace detail
 {
@@ -38,6 +38,6 @@ void ApplyOFork(unsigned char *top,
                 uint8_t control);
 
 } // namespace detail
-} // namespace fms
+} // namespace ofr
 
 #endif

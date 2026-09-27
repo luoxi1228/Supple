@@ -3,6 +3,7 @@
 #include "../../ObliviousPrimitives.hpp"
 #include "../../utils.hpp"
 #endif
+#include "../OnlineProfile.hpp"
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
@@ -213,33 +214,44 @@ static ControlReadResult SWOControlRead(const unsigned char *D,
     size_t n, size_t m, size_t block_size,
     unsigned char *S, size_t out_capacity_blocks,
     size_t p, std::vector<SwoDataWorkspace> &workspaces,
-    size_t depth)
+    size_t depth, enc_ret *profile)
 {
+  double *copy_ms = profile ? &profile->online_copy_ms : nullptr;
+  double *route_ms = profile ? &profile->online_route_ms : nullptr;
+  double *shuffle_ms = profile ? &profile->online_shuffle_ms : nullptr;
   size_t written = 0;
   for (const FrontierNode &node : nodes)
   {
     const size_t nv = SwoNodeCapacity(n, m, node.count);
     SwoDataWorkspace &child = workspaces[depth];
-    child.ensure_capacity(n, block_size);
-    // Keep the parent unchanged: all Frontier targets refer to the same D.
-    std::memcpy(child.data_ptr(), D, n * block_size);
+    online_profile::Track(copy_ms, [&] {
+      child.ensure_capacity(n, block_size);
+      // Keep the parent unchanged: all Frontier targets refer to the same D.
+      std::memcpy(child.data_ptr(), D, n * block_size);
+    });
     if (nv < n)
     {
       SwoCheckControlSpan(C, p, n);
       bool *selected = AcquireSelectedScratch(n);
       if (selected == nullptr)
         throw std::bad_alloc();
-      UnpackControlBitsToBoolArray(C, p, n, selected);
+      online_profile::Track(route_ms, [&] {
+        UnpackControlBitsToBoolArray(C, p, n, selected);
+        TightCompact_v2(child.data_ptr(), n, block_size, selected);
+      });
       p += n;
-      TightCompact_v2(child.data_ptr(), n, block_size, selected); //非稳定版本
     }
     if (node.count == 1)
     {
       if (nv != m || m > out_capacity_blocks - written)
         throw std::length_error("SWO leaf output capacity mismatch");
       unsigned char *sample = S + written * block_size;
-      std::memcpy(sample, child.data_ptr(), m * block_size);
-      RecursiveShuffle_M2(sample, m, block_size);
+      online_profile::Track(copy_ms, [&] {
+        std::memcpy(sample, child.data_ptr(), m * block_size);
+      });
+      online_profile::Track(shuffle_ms, [&] {
+        RecursiveShuffle_M2(sample, m, block_size);
+      });
       written += m;
     }
     else
@@ -247,7 +259,8 @@ static ControlReadResult SWOControlRead(const unsigned char *D,
       const ControlReadResult result =
           SWOControlRead(child.data_ptr(), C, SwoChildren(node.count), nv, m,
                         block_size, S + written * block_size,
-                        out_capacity_blocks - written, p, workspaces, depth + 1);
+                        out_capacity_blocks - written, p, workspaces, depth + 1,
+                        profile);
       written += result.written_blocks;
       p = result.next_pos;
     }
@@ -260,7 +273,7 @@ ControlReadResult SWOControlRead(const unsigned char *D,
     const std::vector<FrontierNode> &nodes,
     size_t n, size_t m, size_t block_size,
     unsigned char *S, size_t out_capacity_blocks,
-    size_t p)
+    size_t p, enc_ret *profile)
 {
   size_t bytes = 0;
   if (D == nullptr || S == nullptr || block_size == 0 ||
@@ -269,7 +282,7 @@ ControlReadResult SWOControlRead(const unsigned char *D,
     throw std::invalid_argument("Invalid SWO data/output buffer dimensions");
   std::vector<SwoDataWorkspace> workspaces(SwoNodeDepth(nodes));
   return SWOControlRead(D, C, nodes, n, m, block_size, S, out_capacity_blocks,
-                      p, workspaces, 0);
+                      p, workspaces, 0, profile);
 }
 
 // ECALL adapter: encryption, PRB lifetime and timing wrap the serial algorithms.
@@ -296,6 +309,8 @@ extern "C" void DecSuppleSWO(unsigned char *encrypted_buffer,
   ret->ptime = 0.0;
   ret->gen_perm_time = 0.0;
   ret->apply_perm_time = 0.0;
+  ret->online_route_ms = ret->online_reorder_ms = 0.0;
+  ret->online_copy_ms = ret->online_shuffle_ms = 0.0;
 #ifdef COUNT_OSWAPS
   ret->OSWAP_count = 0;
 #endif
@@ -362,7 +377,8 @@ extern "C" void DecSuppleSWO(unsigned char *encrypted_buffer,
   ocall_clock(&t0);
   const ControlReadResult result =
       SWOControlRead(decrypted_buffer, C, nodes, N, M, decrypted_block_size,
-                     plain_result.data(), total_blocks, 0);
+                     plain_result.data(), total_blocks, 0,
+                     ret->collect_online_profile ? ret : nullptr);
   ocall_clock(&t1);
   ret->apply_perm_time = static_cast<double>(t1 - t0) / 1000.0;
   ret->ptime = ret->gen_perm_time + ret->apply_perm_time;

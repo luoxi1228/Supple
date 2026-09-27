@@ -1,6 +1,6 @@
 enclave {
     trusted {
-        public int FMSCompactPrepare(
+        public int OFRCompactPrepare(
             [in, size=n] uint8_t *routing_tags,
             size_t n,
             size_t n_left,
@@ -8,7 +8,7 @@ enclave {
             [out] size_t *control_words,
             [out] double *control_us);
 
-        public double FMSCompactOnline(
+        public double OFRCompactOnline(
             [user_check] unsigned char *buffer,
             size_t n,
             size_t block_size);
@@ -18,6 +18,6 @@ enclave {
             size_t n,
             size_t block_size);
 
-        public void FMSCompactRelease(void);
+        public void OFRCompactRelease(void);
     };
 };

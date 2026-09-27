@@ -137,7 +137,8 @@ Enclave_Cpp_Files := Enclave/Enclave.cpp Enclave/utils.cpp Enclave/ORShuffle/Rec
 		Enclave/ObliviousPrimitives.cpp Enclave/ORCompaction/TightCompaction.cpp Enclave/ORCompaction/TightCompaction_v2.cpp \
 		Enclave/SubSample/SubSample.cpp Enclave/PSQF19/SWO/PSQF_SWO.cpp \
 		Enclave/SubSample_v2/SWO/SuppleSWO.cpp Enclave/SubSample_v2/SWO/helper.cpp \
-		Enclave/SubSample_v2/FMS/FMS.cpp Enclave/SubSample_v2/FMS/helper.cpp Enclave/SubSample_v2/FMS/FMSBenchmark.cpp \
+		Enclave/SubSample_v2/OFR/OFR.cpp Enclave/SubSample_v2/OFR/helper.cpp Enclave/SubSample_v2/OFR/OFRBenchmark.cpp \
+		Enclave/SubSample_v2/OFRSupple/OFRSupple.cpp \
 		Enclave/SubSample_v2_Par/SuppleSWO_parallel.cpp Enclave/SubSample_v2_Par/helper.cpp \
 		$(wildcard Enclave/Edger8rSyntax/*.cpp) $(wildcard Enclave/TrustedLibrary/*.cpp)
 

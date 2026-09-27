@@ -1,4 +1,4 @@
-#include "FMS.hpp"
+#include "OFR.hpp"
 #include "helper.hpp"
 
 #include <algorithm>
@@ -10,7 +10,7 @@
 #include "../../oasm_lib.h"
 #endif
 
-namespace fms
+namespace ofr
 {
 
 using detail::AddOverflowSize;
@@ -53,7 +53,7 @@ CapacitySplit SplitCapacities(size_t n, size_t n_left, size_t n_right)
   return split;
 }
 
-size_t FMSControlCountImpl(size_t n, size_t n_left, size_t n_right)
+size_t OFRControlCountImpl(size_t n, size_t n_left, size_t n_right)
 {
   if (n_left == 0 || n_right == 0)
     return 0;
@@ -61,19 +61,19 @@ size_t FMSControlCountImpl(size_t n, size_t n_left, size_t n_right)
     return 1;
 
   const CapacitySplit split = SplitCapacities(n, n_left, n_right);
-  const size_t top_count = FMSControlCountImpl(
+  const size_t top_count = OFRControlCountImpl(
       split.n_top, split.top_left, split.top_right);
-  const size_t bottom_count = FMSControlCountImpl(
+  const size_t bottom_count = OFRControlCountImpl(
       split.n_bottom, split.bottom_left, split.bottom_right);
 
   size_t result = 0;
   if (AddOverflowSize(n / 2, top_count, &result) ||
       AddOverflowSize(result, bottom_count, &result))
-    throw std::length_error("FMS control count overflow");
+    throw std::length_error("OFR control count overflow");
   return result;
 }
 
-size_t FMSControlWriteImpl(const std::vector<uint8_t> &tags,
+size_t OFRControlWriteImpl(const std::vector<uint8_t> &tags,
                            std::vector<uint8_t> &controls,
                            size_t n,
                            size_t n_left,
@@ -87,12 +87,12 @@ size_t FMSControlWriteImpl(const std::vector<uint8_t> &tags,
   {
     controls[position] = OForkControl(tags[0],
                                       tags[1],
-                                      FMS_TAG_LEFT,
-                                      FMS_TAG_RIGHT);
+                                      OFR_TAG_LEFT,
+                                      OFR_TAG_RIGHT);
     return position + 1;
   }
 
-  const FMSBalanceResult balanced = FMSBalance(
+  const OFRBalanceResult balanced = OFRBalance(
       tags, n, n_left, n_right);
   std::copy(balanced.controls.begin(),
             balanced.controls.end(),
@@ -100,13 +100,13 @@ size_t FMSControlWriteImpl(const std::vector<uint8_t> &tags,
   position += n / 2;
 
   const CapacitySplit split = SplitCapacities(n, n_left, n_right);
-  position = FMSControlWriteImpl(balanced.top_tags,
+  position = OFRControlWriteImpl(balanced.top_tags,
                                  controls,
                                  split.n_top,
                                  split.top_left,
                                  split.top_right,
                                  position);
-  return FMSControlWriteImpl(balanced.bottom_tags,
+  return OFRControlWriteImpl(balanced.bottom_tags,
                              controls,
                              split.n_bottom,
                              split.bottom_left,
@@ -116,7 +116,7 @@ size_t FMSControlWriteImpl(const std::vector<uint8_t> &tags,
 
 // The two recursive children occupy the even and odd record lanes. Recurse
 // with a doubled stride instead of materializing either child in a vector.
-size_t FMSApplyStrided(unsigned char *data,
+size_t OFRApplyStrided(unsigned char *data,
                        const std::vector<uint8_t> &controls,
                        size_t n,
                        size_t n_left,
@@ -147,7 +147,7 @@ size_t FMSApplyStrided(unsigned char *data,
   position += gate_count;
 
   const CapacitySplit split = SplitCapacities(n, n_left, n_right);
-  position = FMSApplyStrided(data,
+  position = OFRApplyStrided(data,
                              controls,
                              split.n_top,
                              split.top_left,
@@ -155,7 +155,7 @@ size_t FMSApplyStrided(unsigned char *data,
                              block_size,
                              stride * 2,
                              position);
-  return FMSApplyStrided(data + byte_stride,
+  return OFRApplyStrided(data + byte_stride,
                           controls,
                           split.n_bottom,
                           split.bottom_left,
@@ -166,7 +166,7 @@ size_t FMSApplyStrided(unsigned char *data,
 }
 
 // Build the public permutation from strided lanes to the left/right DFS
-// concatenation order specified by FMSControlRead.
+// concatenation order specified by OFRControlRead.
 void BuildOutputDestinations(size_t n,
                              size_t n_left,
                              size_t n_right,
@@ -212,13 +212,13 @@ void BuildOutputDestinations(size_t n,
 void ApplyOutputSwaps(unsigned char *data,
                       size_t n,
                       size_t block_size,
-                      const std::vector<FMSOutputSwap> &swaps)
+                      const std::vector<OFROutputSwap> &swaps)
 {
   for (size_t i = 0; i < swaps.size(); ++i)
   {
-    const FMSOutputSwap &swap = swaps[i];
+    const OFROutputSwap &swap = swaps[i];
     if (swap.first >= n || swap.second >= n)
-      throw std::invalid_argument("Invalid FMS output swap");
+      throw std::invalid_argument("Invalid OFR output swap");
     unsigned char *first = data + swap.first * block_size;
     unsigned char *second = data + swap.second * block_size;
     for (size_t byte = 0; byte < block_size; ++byte)
@@ -396,16 +396,16 @@ struct StyledGate
 
 } // namespace
 
-std::array<uint8_t, 10> FMSPairMask(uint8_t x, uint8_t y)
+std::array<uint8_t, 10> OFRPairMask(uint8_t x, uint8_t y)
 {
-  const uint8_t x_zero = CtEqualU8(x, FMS_TAG_ZERO);
-  const uint8_t x_left = CtEqualU8(x, FMS_TAG_LEFT);
-  const uint8_t x_right = CtEqualU8(x, FMS_TAG_RIGHT);
-  const uint8_t x_both = CtEqualU8(x, FMS_TAG_BOTH);
-  const uint8_t y_zero = CtEqualU8(y, FMS_TAG_ZERO);
-  const uint8_t y_left = CtEqualU8(y, FMS_TAG_LEFT);
-  const uint8_t y_right = CtEqualU8(y, FMS_TAG_RIGHT);
-  const uint8_t y_both = CtEqualU8(y, FMS_TAG_BOTH);
+  const uint8_t x_zero = CtEqualU8(x, OFR_TAG_ZERO);
+  const uint8_t x_left = CtEqualU8(x, OFR_TAG_LEFT);
+  const uint8_t x_right = CtEqualU8(x, OFR_TAG_RIGHT);
+  const uint8_t x_both = CtEqualU8(x, OFR_TAG_BOTH);
+  const uint8_t y_zero = CtEqualU8(y, OFR_TAG_ZERO);
+  const uint8_t y_left = CtEqualU8(y, OFR_TAG_LEFT);
+  const uint8_t y_right = CtEqualU8(y, OFR_TAG_RIGHT);
+  const uint8_t y_both = CtEqualU8(y, OFR_TAG_BOTH);
 
   std::array<uint8_t, 10> pair = {{
       static_cast<uint8_t>(x_zero & y_zero),
@@ -434,16 +434,16 @@ uint8_t OForkControl(uint8_t x,
   const uint8_t cross = static_cast<uint8_t>(
       CtEqualU8(top_tag, y) & CtEqualU8(bottom_tag, x));
   const uint8_t copy_x = static_cast<uint8_t>(
-      CtEqualU8(x, FMS_TAG_BOTH) & CtEqualU8(y, FMS_TAG_ZERO));
+      CtEqualU8(x, OFR_TAG_BOTH) & CtEqualU8(y, OFR_TAG_ZERO));
   const uint8_t copy_y = static_cast<uint8_t>(
-      CtEqualU8(x, FMS_TAG_ZERO) & CtEqualU8(y, FMS_TAG_BOTH));
+      CtEqualU8(x, OFR_TAG_ZERO) & CtEqualU8(y, OFR_TAG_BOTH));
   const uint8_t copy_pair = static_cast<uint8_t>(copy_x | copy_y);
   const uint8_t left_right = static_cast<uint8_t>(
-      CtEqualU8(top_tag, FMS_TAG_LEFT) &
-      CtEqualU8(bottom_tag, FMS_TAG_RIGHT));
+      CtEqualU8(top_tag, OFR_TAG_LEFT) &
+      CtEqualU8(bottom_tag, OFR_TAG_RIGHT));
   const uint8_t right_left = static_cast<uint8_t>(
-      CtEqualU8(top_tag, FMS_TAG_RIGHT) &
-      CtEqualU8(bottom_tag, FMS_TAG_LEFT));
+      CtEqualU8(top_tag, OFR_TAG_RIGHT) &
+      CtEqualU8(bottom_tag, OFR_TAG_LEFT));
   const uint8_t fork = static_cast<uint8_t>(
       copy_pair & (left_right | right_left));
 
@@ -452,13 +452,13 @@ uint8_t OForkControl(uint8_t x,
       fork & (straight ^ 1U) & (cross ^ 1U));
   const uint8_t fork_control = static_cast<uint8_t>((copy_y << 1U) | copy_y);
 
-  uint8_t control = FMS_STRAIGHT;
-  control = CtSelectU8(control, FMS_SWAP, use_cross);
+  uint8_t control = OFR_STRAIGHT;
+  control = CtSelectU8(control, OFR_SWAP, use_cross);
   control = CtSelectU8(control, fork_control, use_fork);
   return control;
 }
 
-std::vector<uint8_t> FMSNormalize(const std::vector<uint8_t> &tags,
+std::vector<uint8_t> OFRNormalize(const std::vector<uint8_t> &tags,
                                   size_t n,
                                   size_t n_left,
                                   size_t n_right)
@@ -479,7 +479,7 @@ std::vector<uint8_t> FMSNormalize(const std::vector<uint8_t> &tags,
   size_t zero_rank = 0;
   for (size_t i = 0; i < n; ++i)
   {
-    const uint8_t is_zero = CtEqualU8(tags[i], FMS_TAG_ZERO);
+    const uint8_t is_zero = CtEqualU8(tags[i], OFR_TAG_ZERO);
     const uint8_t use_left = static_cast<uint8_t>(
         is_zero & CtLessSize(zero_rank, assign_left));
     const uint8_t after_left = static_cast<uint8_t>(
@@ -490,15 +490,15 @@ std::vector<uint8_t> FMSNormalize(const std::vector<uint8_t> &tags,
         is_zero & after_left & before_end);
 
     uint8_t tag = normalized[i];
-    tag = CtSelectU8(tag, FMS_TAG_LEFT, use_left);
-    tag = CtSelectU8(tag, FMS_TAG_RIGHT, use_right);
+    tag = CtSelectU8(tag, OFR_TAG_LEFT, use_left);
+    tag = CtSelectU8(tag, OFR_TAG_RIGHT, use_right);
     normalized[i] = tag;
     zero_rank += is_zero;
   }
   return normalized;
 }
 
-FMSBalanceResult FMSBalance(const std::vector<uint8_t> &tags,
+OFRBalanceResult OFRBalance(const std::vector<uint8_t> &tags,
                             size_t n,
                             size_t n_left,
                             size_t n_right)
@@ -510,7 +510,7 @@ FMSBalanceResult FMSBalance(const std::vector<uint8_t> &tags,
   size_t histogram[10] = {};
   for (size_t gate = 0; gate < gate_count; ++gate)
   {
-    const std::array<uint8_t, 10> pair = FMSPairMask(
+    const std::array<uint8_t, 10> pair = OFRPairMask(
         tags[2 * gate], tags[2 * gate + 1]);
     for (size_t type = 0; type < 10; ++type)
       histogram[type] += pair[type];
@@ -547,7 +547,7 @@ FMSBalanceResult FMSBalance(const std::vector<uint8_t> &tags,
   const int64_t quota_right =
       target_right - fixed_right - diagonal + quota_diagonal;
 
-  FMSBalanceResult result;
+  OFRBalanceResult result;
   result.controls.resize(gate_count);
   result.top_tags.resize(split.n_top);
   result.bottom_tags.resize(split.n_bottom);
@@ -559,7 +559,7 @@ FMSBalanceResult FMSBalance(const std::vector<uint8_t> &tags,
   {
     const uint8_t x = tags[2 * gate];
     const uint8_t y = tags[2 * gate + 1];
-    const std::array<uint8_t, 10> pair = FMSPairMask(x, y);
+    const std::array<uint8_t, 10> pair = OFRPairMask(x, y);
     const uint8_t diagonal_type = pair[5];
     const uint8_t left_variable_type = static_cast<uint8_t>(
         pair[1] | pair[3] | pair[8]);
@@ -607,13 +607,13 @@ FMSBalanceResult FMSBalance(const std::vector<uint8_t> &tags,
   return result;
 }
 
-size_t FMSControlCount(size_t n, size_t n_left, size_t n_right)
+size_t OFRControlCount(size_t n, size_t n_left, size_t n_right)
 {
   ValidateCapacities(n, n_left, n_right);
-  return FMSControlCountImpl(n, n_left, n_right);
+  return OFRControlCountImpl(n, n_left, n_right);
 }
 
-size_t FMSControlWrite(const std::vector<uint8_t> &tags,
+size_t OFRControlWrite(const std::vector<uint8_t> &tags,
                        std::vector<uint8_t> &controls,
                        size_t n,
                        size_t n_left,
@@ -621,31 +621,31 @@ size_t FMSControlWrite(const std::vector<uint8_t> &tags,
                        size_t position)
 {
   ValidateTags(tags, n, n_left, n_right, true);
-  const size_t required = FMSControlCountImpl(n, n_left, n_right);
+  const size_t required = OFRControlCountImpl(n, n_left, n_right);
   if (position > controls.size() || required > controls.size() - position)
-    throw std::length_error("FMS control write exceeds destination array");
-  return FMSControlWriteImpl(
+    throw std::length_error("OFR control write exceeds destination array");
+  return OFRControlWriteImpl(
       tags, controls, n, n_left, n_right, position);
 }
 
-std::vector<uint8_t> FMSControl(const std::vector<uint8_t> &tags,
+std::vector<uint8_t> OFRControl(const std::vector<uint8_t> &tags,
                                 size_t n,
                                 size_t n_left,
                                 size_t n_right)
 {
   ValidateTags(tags, n, n_left, n_right, false);
-  std::vector<uint8_t> normalized = FMSNormalize(
+  std::vector<uint8_t> normalized = OFRNormalize(
       tags, n, n_left, n_right);
   std::vector<uint8_t> controls(
-      FMSControlCountImpl(n, n_left, n_right));
-  const size_t next = FMSControlWriteImpl(
+      OFRControlCountImpl(n, n_left, n_right));
+  const size_t next = OFRControlWriteImpl(
       normalized, controls, n, n_left, n_right, 0);
   if (next != controls.size())
-    throw std::logic_error("FMS control write/count mismatch");
+    throw std::logic_error("OFR control write/count mismatch");
   return controls;
 }
 
-std::vector<FMSOutputSwap> FMSOutputSwaps(size_t n,
+std::vector<OFROutputSwap> OFROutputSwaps(size_t n,
                                            size_t n_left,
                                            size_t n_right)
 {
@@ -655,7 +655,7 @@ std::vector<FMSOutputSwap> FMSOutputSwaps(size_t n,
                           &destinations);
 
   std::vector<uint8_t> visited(n, 0);
-  std::vector<FMSOutputSwap> swaps;
+  std::vector<OFROutputSwap> swaps;
   swaps.reserve(n - 1);
   for (size_t first = 0; first < n; ++first)
   {
@@ -666,8 +666,8 @@ std::vector<FMSOutputSwap> FMSOutputSwaps(size_t n,
     while (next != first)
     {
       if (next >= n || visited[next] != 0)
-        throw std::logic_error("Invalid FMS output permutation");
-      swaps.push_back(FMSOutputSwap{first, next});
+        throw std::logic_error("Invalid OFR output permutation");
+      swaps.push_back(OFROutputSwap{first, next});
       visited[next] = 1;
       next = destinations[next];
     }
@@ -675,7 +675,7 @@ std::vector<FMSOutputSwap> FMSOutputSwaps(size_t n,
   return swaps;
 }
 
-std::vector<uint8_t> FMSLevelOrderControls(
+std::vector<uint8_t> OFRLevelOrderControls(
     const std::vector<uint8_t> &controls,
     size_t n,
     size_t n_left,
@@ -683,27 +683,27 @@ std::vector<uint8_t> FMSLevelOrderControls(
 {
   ValidateCapacities(n, n_left, n_right);
   if (!IsBalancedPowerOfTwo(n, n_left, n_right))
-    throw std::invalid_argument("Level-order FMS requires balanced power-of-two capacities");
-  const size_t required = FMSControlCountImpl(n, n_left, n_right);
+    throw std::invalid_argument("Level-order OFR requires balanced power-of-two capacities");
+  const size_t required = OFRControlCountImpl(n, n_left, n_right);
   if (controls.size() != required)
-    throw std::length_error("FMS control array length mismatch");
+    throw std::length_error("OFR control array length mismatch");
 
   std::vector<uint8_t> level_controls(required);
   const size_t next = WriteLevelOrderControls(
       controls, &level_controls, n, n / 2, 0, 1, 0, 0);
   if (next != required)
-    throw std::logic_error("FMS level-order conversion mismatch");
+    throw std::logic_error("OFR level-order conversion mismatch");
   return level_controls;
 }
 
-std::vector<uint8_t> FMSPostOrderControls(
+std::vector<uint8_t> OFRPostOrderControls(
     const std::vector<uint8_t> &controls,
     size_t n,
     size_t n_left,
     size_t n_right)
 {
   const std::vector<uint8_t> level_controls =
-      FMSLevelOrderControls(controls, n, n_left, n_right);
+      OFRLevelOrderControls(controls, n, n_left, n_right);
   size_t stage = 0;
   for (size_t length = n; length > 2; length /= 2)
     ++stage;
@@ -711,13 +711,13 @@ std::vector<uint8_t> FMSPostOrderControls(
   const size_t next = WritePostOrderControls(
       level_controls, &postorder_controls, 0, n, stage, n / 2, 0);
   if (next != postorder_controls.size())
-    throw std::logic_error("FMS postorder conversion mismatch");
+    throw std::logic_error("OFR postorder conversion mismatch");
   return postorder_controls;
 }
 
-void FMSApplyInPlace(unsigned char *data,
+void OFRApplyInPlace(unsigned char *data,
                      const std::vector<uint8_t> &controls,
-                     const std::vector<FMSOutputSwap> &output_swaps,
+                     const std::vector<OFROutputSwap> &output_swaps,
                      size_t n,
                      size_t n_left,
                      size_t n_right,
@@ -725,16 +725,16 @@ void FMSApplyInPlace(unsigned char *data,
                      bool apply_output_swaps)
 {
   ValidateCapacities(n, n_left, n_right);
-  const size_t required = FMSControlCountImpl(n, n_left, n_right);
+  const size_t required = OFRControlCountImpl(n, n_left, n_right);
   if (controls.size() != required)
-    throw std::length_error("FMS control array length mismatch");
-  FMSApplyPreparedInPlace(data, controls, output_swaps, n, n_left, n_right,
+    throw std::length_error("OFR control array length mismatch");
+  OFRApplyPreparedInPlace(data, controls, output_swaps, n, n_left, n_right,
                           block_size, apply_output_swaps);
 }
 
-void FMSApplyPreparedInPlace(unsigned char *data,
+void OFRApplyPreparedInPlace(unsigned char *data,
                              const std::vector<uint8_t> &controls,
-                             const std::vector<FMSOutputSwap> &output_swaps,
+                             const std::vector<OFROutputSwap> &output_swaps,
                              size_t n,
                              size_t n_left,
                              size_t n_right,
@@ -745,21 +745,21 @@ void FMSApplyPreparedInPlace(unsigned char *data,
   size_t data_bytes = 0;
   if (data == NULL || block_size == 0 ||
       MulOverflowSize(n, block_size, &data_bytes))
-    throw std::invalid_argument("Invalid FMS data dimensions");
+    throw std::invalid_argument("Invalid OFR data dimensions");
   (void)data_bytes;
 
-  const size_t next = FMSApplyStrided(
+  const size_t next = OFRApplyStrided(
       data, controls, n, n_left, n_right, block_size, 1, 0);
   if (next != controls.size())
-    throw std::logic_error("FMS control consumption mismatch");
+    throw std::logic_error("OFR control consumption mismatch");
   if (apply_output_swaps)
     ApplyOutputSwaps(data, n, block_size, output_swaps);
 }
 
-void FMSApplyLevelOrderedInPlace(
+void OFRApplyLevelOrderedInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &level_controls,
-    const std::vector<FMSOutputSwap> &output_swaps,
+    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
@@ -767,18 +767,18 @@ void FMSApplyLevelOrderedInPlace(
     bool apply_output_swaps)
 {
   ValidateCapacities(n, n_left, n_right);
-  const size_t required = FMSControlCountImpl(n, n_left, n_right);
+  const size_t required = OFRControlCountImpl(n, n_left, n_right);
   if (level_controls.size() != required)
-    throw std::length_error("FMS control array length mismatch");
-  FMSApplyPreparedLevelOrderedInPlace(
+    throw std::length_error("OFR control array length mismatch");
+  OFRApplyPreparedLevelOrderedInPlace(
       data, level_controls, output_swaps, n, n_left, n_right,
       block_size, apply_output_swaps);
 }
 
-void FMSApplyPreparedLevelOrderedInPlace(
+void OFRApplyPreparedLevelOrderedInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &level_controls,
-    const std::vector<FMSOutputSwap> &output_swaps,
+    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
@@ -790,7 +790,7 @@ void FMSApplyPreparedLevelOrderedInPlace(
   if (!IsBalancedPowerOfTwo(n, n_left, n_right) ||
       data == NULL || block_size == 0 ||
       MulOverflowSize(n, block_size, &data_bytes))
-    throw std::invalid_argument("Invalid level-order FMS dimensions");
+    throw std::invalid_argument("Invalid level-order OFR dimensions");
   (void)data_bytes;
 
 #ifndef BEFTS_MODE
@@ -824,10 +824,10 @@ void FMSApplyPreparedLevelOrderedInPlace(
     ApplyOutputSwaps(data, n, block_size, output_swaps);
 }
 
-void FMSApplyPostOrderInPlace(
+void OFRApplyPostOrderInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &postorder_controls,
-    const std::vector<FMSOutputSwap> &output_swaps,
+    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
@@ -835,18 +835,18 @@ void FMSApplyPostOrderInPlace(
     bool apply_output_swaps)
 {
   ValidateCapacities(n, n_left, n_right);
-  const size_t required = FMSControlCountImpl(n, n_left, n_right);
+  const size_t required = OFRControlCountImpl(n, n_left, n_right);
   if (postorder_controls.size() != required)
-    throw std::length_error("FMS control array length mismatch");
-  FMSApplyPreparedPostOrderInPlace(
+    throw std::length_error("OFR control array length mismatch");
+  OFRApplyPreparedPostOrderInPlace(
       data, postorder_controls, output_swaps, n, n_left, n_right,
       block_size, apply_output_swaps);
 }
 
-void FMSApplyPreparedPostOrderInPlace(
+void OFRApplyPreparedPostOrderInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &postorder_controls,
-    const std::vector<FMSOutputSwap> &output_swaps,
+    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
@@ -858,7 +858,7 @@ void FMSApplyPreparedPostOrderInPlace(
   if (!IsBalancedPowerOfTwo(n, n_left, n_right) ||
       data == NULL || block_size == 0 ||
       MulOverflowSize(n, block_size, &data_bytes))
-    throw std::invalid_argument("Invalid postorder FMS dimensions");
+    throw std::invalid_argument("Invalid postorder OFR dimensions");
   (void)data_bytes;
 
   const uint8_t *control_data = postorder_controls.data();
@@ -893,26 +893,26 @@ void FMSApplyPreparedPostOrderInPlace(
                                GenericGate());
 
   if (next != postorder_controls.size())
-    throw std::logic_error("FMS postorder control consumption mismatch");
+    throw std::logic_error("OFR postorder control consumption mismatch");
   if (apply_output_swaps)
     ApplyOutputSwaps(data, n, block_size, output_swaps);
 }
 
-void FMSApplyOutputSwapsInPlace(
+void OFRApplyOutputSwapsInPlace(
     unsigned char *data,
     size_t n,
     size_t block_size,
-    const std::vector<FMSOutputSwap> &output_swaps)
+    const std::vector<OFROutputSwap> &output_swaps)
 {
   size_t data_bytes = 0;
   if (data == NULL || block_size == 0 ||
       MulOverflowSize(n, block_size, &data_bytes))
-    throw std::invalid_argument("Invalid FMS data dimensions");
+    throw std::invalid_argument("Invalid OFR data dimensions");
   (void)data_bytes;
   ApplyOutputSwaps(data, n, block_size, output_swaps);
 }
 
-FMSControlReadResult FMSControlRead(const unsigned char *data,
+OFRControlReadResult OFRControlRead(const unsigned char *data,
                                     const std::vector<uint8_t> &controls,
                                     size_t n,
                                     size_t n_left,
@@ -924,29 +924,29 @@ FMSControlReadResult FMSControlRead(const unsigned char *data,
   size_t data_bytes = 0;
   if (data == NULL || block_size == 0 ||
       MulOverflowSize(n, block_size, &data_bytes))
-    throw std::invalid_argument("Invalid FMS data dimensions");
+    throw std::invalid_argument("Invalid OFR data dimensions");
   (void)data_bytes;
 
-  const size_t required = FMSControlCountImpl(n, n_left, n_right);
+  const size_t required = OFRControlCountImpl(n, n_left, n_right);
   if (position > controls.size() || required > controls.size() - position)
-    throw std::length_error("FMS control read exceeds source array");
+    throw std::length_error("OFR control read exceeds source array");
   uint8_t invalid_control = 0;
   for (size_t i = 0; i < required; ++i)
     invalid_control = static_cast<uint8_t>(
         invalid_control | (controls[position + i] >> 2U));
   if (invalid_control != 0)
-    throw std::invalid_argument("Invalid FMS control word");
+    throw std::invalid_argument("Invalid OFR control word");
 
   std::vector<unsigned char> work(data, data + data_bytes);
-  const size_t next = FMSApplyStrided(
+  const size_t next = OFRApplyStrided(
       work.data(), controls, n, n_left, n_right, block_size, 1, position);
   if (next != position + required)
-    throw std::logic_error("FMS control consumption mismatch");
-  const std::vector<FMSOutputSwap> output_swaps =
-      FMSOutputSwaps(n, n_left, n_right);
+    throw std::logic_error("OFR control consumption mismatch");
+  const std::vector<OFROutputSwap> output_swaps =
+      OFROutputSwaps(n, n_left, n_right);
   ApplyOutputSwaps(work.data(), n, block_size, output_swaps);
 
-  FMSControlReadResult result;
+  OFRControlReadResult result;
   const size_t left_bytes = n_left * block_size;
   result.left.assign(work.begin(), work.begin() + left_bytes);
   result.right.assign(work.begin() + left_bytes, work.end());
@@ -954,37 +954,37 @@ FMSControlReadResult FMSControlRead(const unsigned char *data,
   return result;
 }
 
-FMSDataResult FMSApply(const unsigned char *data,
+OFRDataResult OFRApply(const unsigned char *data,
                        const std::vector<uint8_t> &controls,
                        size_t n,
                        size_t n_left,
                        size_t n_right,
                        size_t block_size)
 {
-  const size_t required = FMSControlCount(n, n_left, n_right);
+  const size_t required = OFRControlCount(n, n_left, n_right);
   if (controls.size() != required)
-    throw std::length_error("FMS control array length mismatch");
-  FMSControlReadResult read = FMSControlRead(
+    throw std::length_error("OFR control array length mismatch");
+  OFRControlReadResult read = OFRControlRead(
       data, controls, n, n_left, n_right, block_size, 0);
   if (read.next_pos != required)
-    throw std::logic_error("FMS control consumption mismatch");
-  FMSDataResult result;
+    throw std::logic_error("OFR control consumption mismatch");
+  OFRDataResult result;
   result.left.swap(read.left);
   result.right.swap(read.right);
   return result;
 }
 
-FMSDataResult FMSCompact(const unsigned char *data,
+OFRDataResult OFRCompact(const unsigned char *data,
                          const std::vector<uint8_t> &tags,
                          size_t n,
                          size_t n_left,
                          size_t n_right,
                          size_t block_size)
 {
-  const std::vector<uint8_t> controls = FMSControl(
+  const std::vector<uint8_t> controls = OFRControl(
       tags, n, n_left, n_right);
-  return FMSApply(
+  return OFRApply(
       data, controls, n, n_left, n_right, block_size);
 }
 
-} // namespace fms
+} // namespace ofr

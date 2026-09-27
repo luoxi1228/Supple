@@ -10,25 +10,25 @@ from typing import Callable, Dict, List, TypeVar
 T = TypeVar("T")
 
 # Edit these defaults for no-argument runs; command-line options override them.
-DEFAULT_BINARY = "Application/fmscompact_vs_ocompact"
+DEFAULT_BINARY = "Application/ofrcompact_vs_ocompact"
 DEFAULT_N = [1048576]#[1048576, 2097152, 4194304, 8388608, 16777216]
 DEFAULT_BLOCK_SIZES = [4096]#[4,8,12,16,24,32,64,128,256,512,1024]
 DEFAULT_FORK_RATIOS = [0.25]
 DEFAULT_REPEAT = 15
 DEFAULT_WARMUP = 5
 DEFAULT_SEED = 20260903
-DEFAULT_OUTPUT = "RESULTS/fmscompact_vs_ocompact.csv"
+DEFAULT_OUTPUT = "RESULTS/ofrcompact_vs_ocompact.csv"
 
-# FMS timing fields exclude output reordering, which still runs afterward.
+# OFR timing fields exclude output reordering, which still runs afterward.
 BINARY_FIELDS = [
     "n",
     "block_size",
     "fork_ratio",
     "repeats",
     "control_words",
-    "fms_schedule",
-    "fms_control_ms",
-    "fmscompact_ms",
+    "ofr_schedule",
+    "ofr_control_ms",
+    "ofrcompact_ms",
     "ocompact_ms",
     "speedup",
     "correct",
@@ -43,9 +43,9 @@ CSV_FIELDS = [
     "warmups",
     "seed",
     "control_words",
-    "fms_schedule",
-    "fms_control_ms",
-    "fmscompact_ms",
+    "ofr_schedule",
+    "ofr_control_ms",
+    "ofrcompact_ms",
     "ocompact_ms",
     "speedup",
     "correct",
@@ -74,7 +74,7 @@ def parse_csv_values(raw: str, cast: Callable[[str], T], name: str) -> List[T]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Compare FMSCompact apply (excluding output "
+            "Compare OFRCompact apply (excluding output "
             "reordering) with one OCompact operation inside the Supple "
             "SGX enclave"
         )
@@ -255,13 +255,13 @@ def main() -> int:
 
                 print(
                     "  offline generation: "
-                    f"FMSControl="
-                    f"{float(result['fms_control_ms']):.3f} ms"
+                    f"OFRControl="
+                    f"{float(result['ofr_control_ms']):.3f} ms"
                 )
                 print(
                     "  online mean: "
-                    f"FMS {result['fms_schedule']} "
-                    f"(no output reorder)={float(result['fmscompact_ms']):.3f} ms, "
+                    f"OFR {result['ofr_schedule']} "
+                    f"(no output reorder)={float(result['ofrcompact_ms']):.3f} ms, "
                     f"OCompact={float(result['ocompact_ms']):.3f} ms, "
                     f"speedup={float(result['speedup']):.3f}x"
                 )

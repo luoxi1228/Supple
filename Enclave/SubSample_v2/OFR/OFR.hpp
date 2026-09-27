@@ -1,98 +1,98 @@
-#ifndef SUPPLE_FMS_HPP
-#define SUPPLE_FMS_HPP
+#ifndef SUPPLE_OFR_HPP
+#define SUPPLE_OFR_HPP
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
-namespace fms
+namespace ofr
 {
 
 // Routing tags: bit 1 is left responsibility; bit 0 is right responsibility.
-enum FMSRoutingTag : uint8_t
+enum OFRRoutingTag : uint8_t
 {
-  FMS_TAG_ZERO = 0,
-  FMS_TAG_RIGHT = 1,
-  FMS_TAG_LEFT = 2,
-  FMS_TAG_BOTH = 3
+  OFR_TAG_ZERO = 0,
+  OFR_TAG_RIGHT = 1,
+  OFR_TAG_LEFT = 2,
+  OFR_TAG_BOTH = 3
 };
 
 // Control words use the same physical bit positions but different semantics:
 // 00 -> (x,x), 01 -> (x,y), 10 -> (y,x), 11 -> (y,y).
-enum FMSControlWord : uint8_t
+enum OFRControlWord : uint8_t
 {
-  FMS_COPY_FIRST = 0,
-  FMS_STRAIGHT = 1,
-  FMS_SWAP = 2,
-  FMS_COPY_SECOND = 3
+  OFR_COPY_FIRST = 0,
+  OFR_STRAIGHT = 1,
+  OFR_SWAP = 2,
+  OFR_COPY_SECOND = 3
 };
 
-struct FMSBalanceResult
+struct OFRBalanceResult
 {
   std::vector<uint8_t> controls;
   std::vector<uint8_t> top_tags;
   std::vector<uint8_t> bottom_tags;
 };
 
-struct FMSDataResult
+struct OFRDataResult
 {
   std::vector<unsigned char> left;
   std::vector<unsigned char> right;
 };
 
-struct FMSControlReadResult
+struct OFRControlReadResult
 {
   std::vector<unsigned char> left;
   std::vector<unsigned char> right;
   size_t next_pos;
 };
 
-struct FMSOutputSwap
+struct OFROutputSwap
 {
   size_t first;
   size_t second;
 };
 
-std::array<uint8_t, 10> FMSPairMask(uint8_t x, uint8_t y);
+std::array<uint8_t, 10> OFRPairMask(uint8_t x, uint8_t y);
 
 uint8_t OForkControl(uint8_t x,
                      uint8_t y,
                      uint8_t top_tag,
                      uint8_t bottom_tag);
 
-std::vector<uint8_t> FMSNormalize(const std::vector<uint8_t> &tags,
+std::vector<uint8_t> OFRNormalize(const std::vector<uint8_t> &tags,
                                   size_t n,
                                   size_t n_left,
                                   size_t n_right);
 
-FMSBalanceResult FMSBalance(const std::vector<uint8_t> &tags,
+OFRBalanceResult OFRBalance(const std::vector<uint8_t> &tags,
                             size_t n,
                             size_t n_left,
                             size_t n_right);
 
-size_t FMSControlCount(size_t n, size_t n_left, size_t n_right);
+size_t OFRControlCount(size_t n, size_t n_left, size_t n_right);
 
-size_t FMSControlWrite(const std::vector<uint8_t> &tags,
+size_t OFRControlWrite(const std::vector<uint8_t> &tags,
                        std::vector<uint8_t> &controls,
                        size_t n,
                        size_t n_left,
                        size_t n_right,
                        size_t position);
 
-std::vector<uint8_t> FMSControl(const std::vector<uint8_t> &tags,
+std::vector<uint8_t> OFRControl(const std::vector<uint8_t> &tags,
                                 size_t n,
                                 size_t n_left,
                                 size_t n_right);
 
 // The output order is public: prepare this swap plan before online execution.
-std::vector<FMSOutputSwap> FMSOutputSwaps(size_t n,
+std::vector<OFROutputSwap> OFROutputSwaps(size_t n,
                                            size_t n_left,
                                            size_t n_right);
 
 // Reorder a balanced power-of-two control tape for the original level-order
 // OFork network. This conversion depends only on public dimensions.
-std::vector<uint8_t> FMSLevelOrderControls(
+std::vector<uint8_t> OFRLevelOrderControls(
     const std::vector<uint8_t> &controls,
     size_t n,
     size_t n_left,
@@ -101,38 +101,38 @@ std::vector<uint8_t> FMSLevelOrderControls(
 // Offline conversion for balanced power-of-two dimensions. The resulting
 // tape finishes each contiguous half before the gates between the halves,
 // matching ORCompact's execution order.
-std::vector<uint8_t> FMSPostOrderControls(
+std::vector<uint8_t> OFRPostOrderControls(
     const std::vector<uint8_t> &controls,
     size_t n,
     size_t n_left,
     size_t n_right);
 
 // Apply prepared controls directly to a writable n-record buffer. This path
-// performs no dynamic allocations and preserves FMSControlRead's output order.
-void FMSApplyInPlace(unsigned char *data,
+// performs no dynamic allocations and preserves OFRControlRead's output order.
+void OFRApplyInPlace(unsigned char *data,
                      const std::vector<uint8_t> &controls,
-                     const std::vector<FMSOutputSwap> &output_swaps,
+                     const std::vector<OFROutputSwap> &output_swaps,
                      size_t n,
                      size_t n_left,
                      size_t n_right,
                      size_t block_size,
                      bool apply_output_swaps = true);
 
-void FMSApplyLevelOrderedInPlace(
+void OFRApplyLevelOrderedInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &level_controls,
-    const std::vector<FMSOutputSwap> &output_swaps,
+    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
     size_t block_size,
     bool apply_output_swaps = true);
 
-// Apply a tape returned by FMSPostOrderControls. Balanced power-of-two only.
-void FMSApplyPostOrderInPlace(
+// Apply a tape returned by OFRPostOrderControls. Balanced power-of-two only.
+void OFRApplyPostOrderInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &postorder_controls,
-    const std::vector<FMSOutputSwap> &output_swaps,
+    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
@@ -141,30 +141,30 @@ void FMSApplyPostOrderInPlace(
 
 // The following entry points skip the recursive control-count check. Call
 // them only with controls already validated during the offline prepare phase.
-void FMSApplyPreparedInPlace(
+void OFRApplyPreparedInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &controls,
-    const std::vector<FMSOutputSwap> &output_swaps,
+    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
     size_t block_size,
     bool apply_output_swaps = true);
 
-void FMSApplyPreparedLevelOrderedInPlace(
+void OFRApplyPreparedLevelOrderedInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &level_controls,
-    const std::vector<FMSOutputSwap> &output_swaps,
+    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
     size_t block_size,
     bool apply_output_swaps = true);
 
-void FMSApplyPreparedPostOrderInPlace(
+void OFRApplyPreparedPostOrderInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &postorder_controls,
-    const std::vector<FMSOutputSwap> &output_swaps,
+    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
@@ -172,13 +172,13 @@ void FMSApplyPreparedPostOrderInPlace(
     bool apply_output_swaps = true);
 
 // Complete the public output permutation after a network-only apply.
-void FMSApplyOutputSwapsInPlace(
+void OFRApplyOutputSwapsInPlace(
     unsigned char *data,
     size_t n,
     size_t block_size,
-    const std::vector<FMSOutputSwap> &output_swaps);
+    const std::vector<OFROutputSwap> &output_swaps);
 
-FMSControlReadResult FMSControlRead(const unsigned char *data,
+OFRControlReadResult OFRControlRead(const unsigned char *data,
                                     const std::vector<uint8_t> &controls,
                                     size_t n,
                                     size_t n_left,
@@ -186,20 +186,20 @@ FMSControlReadResult FMSControlRead(const unsigned char *data,
                                     size_t block_size,
                                     size_t position);
 
-FMSDataResult FMSApply(const unsigned char *data,
+OFRDataResult OFRApply(const unsigned char *data,
                        const std::vector<uint8_t> &controls,
                        size_t n,
                        size_t n_left,
                        size_t n_right,
                        size_t block_size);
 
-FMSDataResult FMSCompact(const unsigned char *data,
+OFRDataResult OFRCompact(const unsigned char *data,
                          const std::vector<uint8_t> &tags,
                          size_t n,
                          size_t n_left,
                          size_t n_right,
                          size_t block_size);
 
-} // namespace fms
+} // namespace ofr
 
 #endif

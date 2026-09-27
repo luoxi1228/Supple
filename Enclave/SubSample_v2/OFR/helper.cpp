@@ -8,7 +8,7 @@
 #include "../../oasm_lib.h"
 #endif
 
-namespace fms
+namespace ofr
 {
 namespace detail
 {
@@ -107,7 +107,7 @@ void ValidateCapacities(size_t n, size_t n_left, size_t n_right)
   if (n == 0 || n > static_cast<size_t>(INT64_MAX) ||
       n_left > n || n_right != n - n_left)
   {
-    throw std::invalid_argument("FMS capacities must be nonnegative and sum to n");
+    throw std::invalid_argument("OFR capacities must be nonnegative and sum to n");
   }
 }
 
@@ -119,7 +119,7 @@ void ValidateTags(const std::vector<uint8_t> &tags,
 {
   ValidateCapacities(n, n_left, n_right);
   if (tags.size() != n)
-    throw std::invalid_argument("FMS tag array length mismatch");
+    throw std::invalid_argument("OFR tag array length mismatch");
 
   size_t left_weight = 0;
   size_t right_weight = 0;
@@ -135,7 +135,7 @@ void ValidateTags(const std::vector<uint8_t> &tags,
       ? (left_weight != n_left || right_weight != n_right)
       : (left_weight > n_left || right_weight > n_right);
   if (invalid != 0 || weights_invalid)
-    throw std::invalid_argument("FMS routing tags do not match output capacities");
+    throw std::invalid_argument("OFR routing tags do not match output capacities");
 }
 
 #ifndef BEFTS_MODE
@@ -208,4 +208,4 @@ void ApplyOFork(unsigned char *top,
 }
 
 } // namespace detail
-} // namespace fms
+} // namespace ofr

@@ -9,7 +9,7 @@
 #include <random>
 #include <vector>
 
-#include "../Untrusted/FMSCompact.hpp"
+#include "../Untrusted/OFRCompact.hpp"
 #include "../Untrusted/OLib.hpp"
 
 namespace
@@ -191,17 +191,17 @@ bool CheckCorrectness(const std::vector<unsigned char> &initial,
                       size_t n_right,
                       size_t block_size)
 {
-  std::vector<unsigned char> fms = initial;
+  std::vector<unsigned char> ofr = initial;
   std::vector<unsigned char> compact = initial;
 
-  if (FMSCompactOnline(fms.data(), n, block_size) < 0.0 ||
+  if (OFRCompactOnline(ofr.data(), n, block_size) < 0.0 ||
       OCompactOnline(compact.data(), n, block_size) < 0.0)
   {
     return false;
   }
 
-  return VerifySide(fms.data(), 0, n_left, block_size, tags, TAG_LEFT) &&
-         VerifySide(fms.data(), n_left, n_right, block_size, tags, TAG_RIGHT) &&
+  return VerifySide(ofr.data(), 0, n_left, block_size, tags, TAG_LEFT) &&
+         VerifySide(ofr.data(), n_left, n_right, block_size, tags, TAG_RIGHT) &&
          VerifySide(compact.data(),
                     0,
                     n_left,
@@ -210,14 +210,14 @@ bool CheckCorrectness(const std::vector<unsigned char> &initial,
                     TAG_LEFT);
 }
 
-double RunFMSCompact(std::vector<unsigned char> *work,
+double RunOFRCompact(std::vector<unsigned char> *work,
                      const std::vector<unsigned char> &initial,
                      size_t n,
                      size_t block_size)
 {
   // Input restoration is deliberately outside the enclave-side timer.
   std::copy(initial.begin(), initial.end(), work->begin());
-  return FMSCompactOnline(work->data(), n, block_size);
+  return OFRCompactOnline(work->data(), n, block_size);
 }
 
 double RunOCompact(std::vector<unsigned char> *work,
@@ -292,7 +292,7 @@ int main(int argc, char **argv)
       static_cast<double>(fork_count) / static_cast<double>(n);
 
   std::vector<unsigned char> initial(bytes);
-  std::vector<unsigned char> fms_work(bytes);
+  std::vector<unsigned char> ofr_work(bytes);
   std::vector<unsigned char> compact_work(bytes);
   InitializeInput(&initial, n, block_size);
 
@@ -302,7 +302,7 @@ int main(int argc, char **argv)
 
   size_t control_words = 0;
   double control_us = -1.0;
-  const int prepare_result = FMSCompactPrepare(tags.data(),
+  const int prepare_result = OFRCompactPrepare(tags.data(),
                                                n,
                                                n_left,
                                                n_right,
@@ -310,7 +310,7 @@ int main(int argc, char **argv)
                                                &control_us);
   if (prepare_result != 0)
   {
-    std::fprintf(stderr, "FMSCompactPrepare failed with code %d.\n", prepare_result);
+    std::fprintf(stderr, "OFRCompactPrepare failed with code %d.\n", prepare_result);
     return 2;
   }
 
@@ -322,52 +322,52 @@ int main(int argc, char **argv)
                  n,
                  block_size,
                  actual_fork_ratio);
-    FMSCompactRelease();
+    OFRCompactRelease();
     return 3;
   }
 
-  std::vector<double> fmscompact_samples;
+  std::vector<double> ofrcompact_samples;
   std::vector<double> compact_samples;
-  fmscompact_samples.reserve(repeats);
+  ofrcompact_samples.reserve(repeats);
   compact_samples.reserve(repeats);
 
   const size_t rounds = warmups + repeats;
   for (size_t round = 0; round < rounds; ++round)
   {
-    double fmscompact_time = -1.0;
+    double ofrcompact_time = -1.0;
     double compact_time = -1.0;
 
     // Alternate order to reduce cache, frequency, and temperature bias.
     if ((round & 1U) == 0U)
     {
-      fmscompact_time = RunFMSCompact(&fms_work, initial, n, block_size);
+      ofrcompact_time = RunOFRCompact(&ofr_work, initial, n, block_size);
       compact_time = RunOCompact(&compact_work, initial, n, block_size);
     }
     else
     {
       compact_time = RunOCompact(&compact_work, initial, n, block_size);
-      fmscompact_time = RunFMSCompact(&fms_work, initial, n, block_size);
+      ofrcompact_time = RunOFRCompact(&ofr_work, initial, n, block_size);
     }
 
-    if (fmscompact_time < 0.0 || compact_time < 0.0)
+    if (ofrcompact_time < 0.0 || compact_time < 0.0)
     {
       std::fprintf(stderr, "An online measurement ECALL failed.\n");
-      FMSCompactRelease();
+      OFRCompactRelease();
       return 2;
     }
 
     if (round >= warmups)
     {
-      fmscompact_samples.push_back(fmscompact_time);
+      ofrcompact_samples.push_back(ofrcompact_time);
       compact_samples.push_back(compact_time);
     }
   }
 
-  const double fms_control_ms = control_us / 1000.0;
-  const double fmscompact_ms = Mean(fmscompact_samples) / 1000.0;
+  const double ofr_control_ms = control_us / 1000.0;
+  const double ofrcompact_ms = Mean(ofrcompact_samples) / 1000.0;
   const double ocompact_ms = Mean(compact_samples) / 1000.0;
-  const double speedup = fmscompact_ms > 0.0
-                             ? ocompact_ms / fmscompact_ms
+  const double speedup = ofrcompact_ms > 0.0
+                             ? ocompact_ms / ofrcompact_ms
                              : std::numeric_limits<double>::infinity();
 
   std::printf(
@@ -380,11 +380,11 @@ int main(int argc, char **argv)
       control_words,
       (n >= 2 && (n & (n - 1)) == 0 && n_left == n / 2)
           ? "postorder" : "strided",
-      fms_control_ms,
-      fmscompact_ms,
+      ofr_control_ms,
+      ofrcompact_ms,
       ocompact_ms,
       speedup);
 
-  FMSCompactRelease();
+  OFRCompactRelease();
   return 0;
 }

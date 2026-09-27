@@ -41,7 +41,7 @@ ControlReadResult SWOControlRead(const unsigned char *D,
     const std::vector<FrontierNode> &nodes,
     size_t n, size_t m, size_t block_size,
     unsigned char *S, size_t out_capacity_blocks,
-    size_t p);
+    size_t p, enc_ret *profile = nullptr);
 
 // ECALL adapter; keeps the generated EDL contract unchanged.
 extern "C" void DecSuppleSWO(unsigned char *encrypted_buffer,
