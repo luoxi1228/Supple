@@ -4,8 +4,10 @@ import argparse
 from functools import lru_cache
 import math
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -33,13 +35,14 @@ def available_cpu_count():
   return max(1, len(physical_cores))
 
 
-DEFAULT_MODE = [2]
+DEFAULT_MODE = [9,2,6,8]
 DEFAULT_P = [0.015625]
 DEFAULT_N = [1048576]
-DEFAULT_K = [64]
-DEFAULT_K_SELECT = 1   # 1 => k = 1/p, 2 => use --k list
+DEFAULT_K = [256]
+DEFAULT_K_SELECT = 2   # 1 => k = 1/p, 2 => use --k list
 DEFAULT_BLOCK_SIZE = [16]
 DEFAULT_REPEAT = 5
+DEFAULT_WARMUP = 1
 DEFAULT_THREADS = 1 #available_cpu_count()
 
 BASE_HEAP = 1000000
@@ -55,7 +58,13 @@ MODE_INFO = {
   6: {"name": "Supple", "needs_k": True, "detailed": True, "fixed_k": False},
   7: {"name": "Supple_parallel", "needs_k": True, "detailed": True, "fixed_k": False},
   8: {"name": "OFRSupple", "needs_k": True, "detailed": True, "fixed_k": False},
+  9: {"name": "ShuffleBasedSWO", "needs_k": True, "detailed": True, "fixed_k": False},
 }
+
+CSV_HEADER_MODES = {2, 6, 8, 9}
+CSV_COMMON_FIELDS = ("block_size", "p", "n", "k", "ecall_time_ms", "ptime_ms")
+CSV_DETAILED_FIELDS = ("gen_perm_offline_ms", "apply_perm_online_ms")
+CSV_TRAILING_FIELDS = ("oswaps", "heap_est_mb")
 
 
 def parse_csv(raw, arg_name, cast):
@@ -88,17 +97,27 @@ def parse_args():
   parser.add_argument("--modes", default=",".join(map(str, DEFAULT_MODE)), help="Comma-separated modes, e.g. 3,4")
   parser.add_argument("--n", default=",".join(map(str, DEFAULT_N)), help="Comma-separated N values")
   parser.add_argument("--p", default=",".join(map(str, DEFAULT_P)), help="Comma-separated P values (0 < P <= 1)")
-  parser.add_argument("--k", default=",".join(map(str, DEFAULT_K)), help="Comma-separated K values (used by modes 4/5/6/7/8)")
+  parser.add_argument("--k", default=",".join(map(str, DEFAULT_K)), help="Comma-separated K values (used by modes 4/5/6/7/8/9)")
   parser.add_argument("--k-select", type=int, choices=[1, 2], default=DEFAULT_K_SELECT,
-                      help="Modes 4/5/6/7/8 K selection: 1 => k=1/p, 2 => use --k list")
+                      help="Modes 4/5/6/7/8/9 K selection: 1 => k=1/p, 2 => use --k list")
   parser.add_argument("--block-sizes", default=",".join(map(str, DEFAULT_BLOCK_SIZE)), help="Comma-separated block sizes")
   parser.add_argument(
     "--repeat", type=int, default=DEFAULT_REPEAT,
-    help="Number of measured rounds averaged after one warm-up round",
+    help="Number of measured rounds included in the average",
   )
+  parser.add_argument("--warmup", type=int, default=DEFAULT_WARMUP,
+                      help="Number of warm-up rounds excluded from the average")
   parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Thread count for mode 7")
   parser.add_argument("--results-folder", default=DEFAULT_RESULTS_FOLDER, help="Results folder path")
   parser.add_argument("--overwrite", action="store_true", help="Overwrite each mode CSV on first write")
+  offline_group = parser.add_mutually_exclusive_group()
+  offline_group.add_argument("--offline-profile", dest="offline_profile",
+                             action="store_true",
+                             help="Collect offline phase timings and enclave heap high-water marks for modes 6 and 8 (adds timing overhead)")
+  offline_group.add_argument("--no-offline-profile", dest="offline_profile",
+                             action="store_false",
+                             help="Skip offline profiling for modes 6 and 8")
+  parser.set_defaults(offline_profile=False)
   return parser.parse_args()
 
 
@@ -255,6 +274,12 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=1):
     heap_memory += derived_k(n, m) * SIZE_T_BYTES
     heap_memory = int(math.ceil(heap_memory * 1.15))
 
+  elif mode == 9:
+    k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
+    # One decrypted dataset, K plaintext samples, and shuffle selection scratch.
+    heap_memory += (m * k * block_size) + n + 64 * 1024
+    heap_memory = int(math.ceil(heap_memory * 1.25))
+
   elif mode == 4:
     k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
     mask_words, left_words, right_words = route_state_sizes(n, m, k)
@@ -273,15 +298,17 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=1):
     k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
     mask_words = (k + WORD_BITS - 1) // WORD_BITS
     swo_bits, ofr_words = ofrsupple_control_counts(n, m, k)
-    # Keep the raw OFR stream for the public write/read API and one prepared
-    # stream for the optimized online path. Public swap plans are shared by
-    # equal node shapes; allow room for their temporary construction as well.
-    control_bytes = (swo_bits + 7) // 8 + 2 * ofr_words
-    shape_bytes = 64 * n
+    # Prepared nodes reference the single OFR stream. Conversion needs a
+    # temporary output tape and one size_t start offset per row of the
+    # largest balanced node; both are freed before online execution.
+    control_bytes = (swo_bits + 7) // 8 + ofr_words
+    shape_bytes = 64 * k
     mark_bytes = n * mask_words * SIZE_T_BYTES
     result_bytes = m * k * block_size
-    # Offline routing keeps membership copies for active OFR ancestors.
-    offline_peak = control_bytes + shape_bytes + mark_bytes + 8 * mark_bytes + 2 * n
+    prepare_bytes = (n // 2) * (n.bit_length() - 1) + n * SIZE_T_BYTES
+    # Offline routing keeps membership workspaces for active OFR ancestors.
+    offline_peak = (control_bytes + shape_bytes + mark_bytes +
+                    8 * mark_bytes + 2 * n + prepare_bytes)
     # Online routing keeps child data and output arrays across recursion.
     online_peak = control_bytes + shape_bytes + result_bytes + 6 * n * block_size + 2 * n
     heap_memory += max(offline_peak, online_peak) + 64 * 1024
@@ -350,13 +377,14 @@ def k_candidates_for(mode, sample_prob, k_values, k_select):
   return [max(1, int(1.0 / sample_prob))]
 
 
-def build_command(mode, n, block_size, sample_prob, k_value, repeat, threads):
+def build_command(mode, n, block_size, sample_prob, k_value, repeat, threads, warmup):
   cmd = ["./application", str(mode), str(n), str(block_size), str(sample_prob)]
   if MODE_INFO[mode]["needs_k"]:
     cmd.append(str(k_value))
   if mode == 7:
     cmd.append(str(threads))
   cmd.append(str(repeat))
+  cmd.append(str(warmup))
   return cmd
 
 
@@ -369,7 +397,7 @@ def resolve_results_folder(raw_path):
 
 def parse_output(mode, output):
   lines = [line.strip() for line in output.splitlines()
-           if line.strip() and not line.startswith("PROFILE,")]
+           if line.strip() and not line.startswith(("PROFILE,", "OFFLINE_PROFILE,"))]
   expected = 5 if MODE_INFO[mode]["detailed"] else 3
   if len(lines) < expected:
     return None
@@ -382,6 +410,27 @@ def parse_output(mode, output):
   except ValueError:
     print("Line with value error is:")
     print(lines)
+    return None
+
+
+OFFLINE_PROFILE_FIELDS = (
+    "mark_ms", "count_ms", "swo_write_ms", "tags_ms", "normalize_ms",
+    "ofr_write_ms", "replay_ms", "project_ms", "prepare_ms", "other_ms",
+    "offline_heap_peak_bytes", "total_heap_peak_bytes",
+)
+
+
+def parse_offline_profile(output):
+  lines = [line for line in output.splitlines()
+           if line.startswith("OFFLINE_PROFILE,")]
+  if len(lines) != 1:
+    return None
+  values = lines[0].split(",")[1:]
+  if len(values) != len(OFFLINE_PROFILE_FIELDS):
+    return None
+  try:
+    return tuple(float(x) for x in values[:10]) + tuple(int(x) for x in values[10:])
+  except ValueError:
     return None
 
 
@@ -403,6 +452,55 @@ def format_csv_line(mode, block_size, sample_prob, n, result):
   return ",".join(str(value) for value in values) + "\n"
 
 
+def result_csv_header(mode):
+  fields = CSV_COMMON_FIELDS
+  if MODE_INFO[mode]["detailed"]:
+    fields += CSV_DETAILED_FIELDS
+  return ",".join(fields + CSV_TRAILING_FIELDS) + "\n"
+
+
+def prepare_result_csv(path, mode, overwrite):
+  """Start one run for a headered CSV, preserving older headerless results."""
+  header = result_csv_header(mode).encode("utf-8")
+  if overwrite or not path.is_file() or path.stat().st_size == 0:
+    path.write_bytes(header)
+    return
+
+  with path.open("rb") as existing:
+    first_line = existing.readline()
+  if first_line.rstrip(b"\r\n") != header.rstrip(b"\n"):
+    first_fields = first_line.rstrip(b"\r\n").split(b",")
+    if len(first_fields) != len(header.rstrip(b"\n").split(b",")) or not first_fields[0].isdigit():
+      raise ValueError(f"CSV header does not match mode {mode}: {path}")
+    # Older result files were headerless. Add the header without discarding data.
+    temp_path = None
+    try:
+      with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as updated:
+        temp_path = Path(updated.name)
+        updated.write(header)
+        with path.open("rb") as existing:
+          shutil.copyfileobj(existing, updated)
+      shutil.copymode(path, temp_path)
+      os.replace(temp_path, path)
+    finally:
+      if temp_path is not None:
+        temp_path.unlink(missing_ok=True)
+
+  with path.open("rb") as existing:
+    existing.readline()
+    has_rows = any(line.strip() for line in existing)
+    if not has_rows:
+      return
+    existing.seek(0, os.SEEK_END)
+    existing.seek(max(0, existing.tell() - 4))
+    tail = existing.read()
+  if tail.endswith((b"\n\n", b"\r\n\r\n")):
+    return
+  separator = b"\r\n" if tail.endswith(b"\r\n") else b"\n" if tail.endswith(b"\n") else b"\n\n"
+  with path.open("ab") as output:
+    output.write(separator)
+
+
 def main():
   if SIZE_T_BYTES <= 0 or WORD_BITS <= 0:
     print("SIZE_T_BYTES must be > 0")
@@ -415,11 +513,15 @@ def main():
   k_values = parse_csv(args.k, "k", int)
   block_sizes = parse_csv(args.block_sizes, "block-sizes", int)
   repeat = int(args.repeat)
+  warmup = int(args.warmup)
   threads = int(args.threads)
   initialized_csv_files = set()
 
   if repeat <= 0:
     print("REPEAT must be > 0")
+    return 1
+  if warmup < 0:
+    print("WARMUP must be >= 0")
     return 1
   if threads <= 0:
     print("THREADS must be > 0")
@@ -439,6 +541,7 @@ def main():
     for block_size in block_sizes:
       for p_rate in p_values:
         results = {}
+        offline_results = {}
         for k_value in k_candidates_for(mode, p_rate, k_values, int(args.k_select)):
           for n in n_values:
             m_value = sample_size(n, p_rate)
@@ -457,7 +560,7 @@ def main():
             if build.returncode != 0:
               print("Build failed before experiment:", build.stderr.decode("utf-8", errors="ignore"))
               return 1
-            cmd = build_command(mode, n, block_size, p_rate, k_value, repeat, threads)
+            cmd = build_command(mode, n, block_size, p_rate, k_value, repeat, threads, warmup)
 
             if mode == 7:
               effective_threads = swo_effective_threads(n, m_value, k_value, threads)
@@ -471,14 +574,21 @@ def main():
                 % (mode, mode_name, block_size, p_rate, n, m_value, k_value, heap_mb)
               )
 
-            proc = subprocess.run(cmd, cwd=str(APP_DIR), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            env = os.environ.copy()
+            # Keep normal totals free of per-phase clock OCALLs, even if this
+            # shell was used for a profiling run earlier.
+            env.pop("ONLINE_PROFILE", None)
+            env.pop("OFFLINE_PROFILE", None)
+            proc = subprocess.run(cmd, cwd=str(APP_DIR), env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if proc.returncode != 0:
               print("Program exited with non-zero status:", proc.returncode)
               if proc.stderr:
                 print("stderr:\n", proc.stderr.decode("utf-8", errors="ignore"))
               continue
 
-            parsed = parse_output(mode, proc.stdout.decode("utf-8", errors="ignore"))
+            output = proc.stdout.decode("utf-8", errors="ignore")
+            parsed = parse_output(mode, output)
             if parsed is None:
               print("Receieved unexpected output, this experiment run has failed. ONE MUST DEBUG!")
               continue
@@ -486,11 +596,54 @@ def main():
             print("Out_lines: %s\n" % (parsed,))
             results[(n, k_value)] = make_result(mode, k_value, parsed, heap_mb)
 
-        file_mode = "w" if args.overwrite and mode not in initialized_csv_files else "a"
-        initialized_csv_files.add(mode)
-        with open(csv_file_name, file_mode) as csv_file:
-          for n, k_used in sorted(results.keys(), key=lambda item: (item[0], item[1])):
-            csv_file.write(format_csv_line(mode, block_size, p_rate, n, results[(n, k_used)]))
+            if args.offline_profile and mode in (6, 8):
+              # Run diagnostics separately so their clock OCALLs never enter
+              # the normal CSV's offline or online totals.
+              profile_env = env.copy()
+              profile_env["OFFLINE_PROFILE"] = "1"
+              profile_proc = subprocess.run(
+                cmd, cwd=str(APP_DIR), env=profile_env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+              if profile_proc.returncode != 0:
+                print("Offline profile run exited with non-zero status:",
+                      profile_proc.returncode)
+                if profile_proc.stderr:
+                  print("stderr:\n", profile_proc.stderr.decode("utf-8", errors="ignore"))
+              else:
+                offline_profile = parse_offline_profile(
+                  profile_proc.stdout.decode("utf-8", errors="ignore"))
+                if offline_profile is None:
+                  print("Offline profile output is missing or invalid")
+                else:
+                  offline_results[(n, k_value)] = (heap_mb, offline_profile)
+
+        if results:
+          if mode in CSV_HEADER_MODES:
+            if mode not in initialized_csv_files:
+              try:
+                prepare_result_csv(csv_file_name, mode, args.overwrite)
+              except ValueError as exc:
+                print(exc, file=sys.stderr)
+                return 1
+            file_mode = "a"
+          else:
+            file_mode = "w" if args.overwrite and mode not in initialized_csv_files else "a"
+          initialized_csv_files.add(mode)
+          with open(csv_file_name, file_mode) as csv_file:
+            for n, k_used in sorted(results.keys(), key=lambda item: (item[0], item[1])):
+              csv_file.write(format_csv_line(mode, block_size, p_rate, n, results[(n, k_used)]))
+        if args.offline_profile and mode in (6, 8):
+          profile_file = results_folder / (mode_name + "_offline_profile.csv")
+          profile_mode = "w" if args.overwrite and profile_file not in initialized_csv_files else "a"
+          initialized_csv_files.add(profile_file)
+          with open(profile_file, profile_mode) as csv_file:
+            if profile_mode == "w" or profile_file.stat().st_size == 0:
+              csv_file.write(",".join(("block_size", "p", "n", "k", "heap_est_mb") +
+                                      OFFLINE_PROFILE_FIELDS) + "\n")
+            for n, k_used in sorted(offline_results):
+              heap_mb, phases = offline_results[(n, k_used)]
+              csv_file.write(",".join(map(str, (block_size, p_rate, n, k_used,
+                                                heap_mb) + phases)) + "\n")
 
   return 0
 

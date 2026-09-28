@@ -38,9 +38,11 @@ struct OFRSuppleControls
     size_t offset;
     size_t shape_index;
     bool postordered;
-    std::vector<uint8_t> tape;
+    size_t count;
   };
-  // Prepared in preorder after the raw tape is written.
+  // A populated nodes array means each span of ofr has been converted in
+  // place to the layout selected by that node. An empty array keeps ofr in
+  // the raw DFS layout used by OFRSuppleControlWrite.
   std::vector<Shape> shapes;
   std::vector<Node> nodes;
 };
@@ -57,11 +59,12 @@ OFRSuppleControlCounts OFRSuppleControlCount(
 OFRSuppleControlPositions OFRSuppleControlWrite(
     const std::vector<size_t> &membership, OFRSuppleControls &controls,
     const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
-    OFRSuppleControlPositions position);
+    OFRSuppleControlPositions position, enc_ret *profile = nullptr);
 
 OFRSuppleControls OFRSuppleControl(
     const std::vector<size_t> &membership,
-    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k);
+    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
+    enc_ret *profile = nullptr);
 
 OFRSuppleReadResult OFRSuppleControlRead(
     const unsigned char *data, const OFRSuppleControls &controls,

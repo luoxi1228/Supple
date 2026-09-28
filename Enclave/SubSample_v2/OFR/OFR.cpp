@@ -125,7 +125,7 @@ size_t OFRControlWriteImpl(uint8_t *tags, std::vector<uint8_t> &controls,
 // The two recursive children occupy the even and odd record lanes. Recurse
 // with a doubled stride instead of materializing either child in a vector.
 size_t OFRApplyStrided(unsigned char *data,
-                       const std::vector<uint8_t> &controls,
+                       const uint8_t *controls,
                        size_t n,
                        size_t n_left,
                        size_t n_right,
@@ -171,6 +171,44 @@ size_t OFRApplyStrided(unsigned char *data,
                           block_size,
                           stride * 2,
                           position);
+}
+
+size_t OFRApplyWordsStrided(size_t *rows, size_t words_per_row,
+                            const uint8_t *controls, size_t n,
+                            size_t n_left, size_t n_right,
+                            size_t stride, size_t position)
+{
+  if (n_left == 0 || n_right == 0)
+    return position;
+
+  const size_t word_stride = stride * words_per_row;
+  const size_t gate_count = n / 2;
+  for (size_t gate = 0; gate < gate_count; ++gate)
+  {
+    size_t *first = rows + (2 * gate) * word_stride;
+    size_t *second = first + word_stride;
+    const uint8_t control = controls[position + gate];
+    const size_t top_mask = size_t(0) - size_t((control >> 1U) & 1U);
+    const size_t bottom_mask = size_t(0) - size_t(control & 1U);
+    for (size_t word = 0; word < words_per_row; ++word)
+    {
+      const size_t x = first[word];
+      const size_t y = second[word];
+      first[word] = (x & ~top_mask) | (y & top_mask);
+      second[word] = (x & ~bottom_mask) | (y & bottom_mask);
+    }
+  }
+  position += gate_count;
+  if (n == 2)
+    return position;
+
+  const CapacitySplit split = SplitCapacities(n, n_left, n_right);
+  position = OFRApplyWordsStrided(
+      rows, words_per_row, controls, split.n_top, split.top_left,
+      split.top_right, stride * 2, position);
+  return OFRApplyWordsStrided(
+      rows + word_stride, words_per_row, controls, split.n_bottom,
+      split.bottom_left, split.bottom_right, stride * 2, position);
 }
 
 bool IsBalancedPowerOfTwo(size_t n, size_t n_left, size_t n_right)
@@ -244,7 +282,7 @@ size_t BuildPostOrderControlStarts(size_t length,
 // Emit the contiguous-block postorder directly from the DFS tape. The public
 // gate geometry determines every source position, so no level-order tape is
 // materialized.
-size_t WritePostOrderFromDfs(const std::vector<uint8_t> &source,
+size_t WritePostOrderFromDfs(const uint8_t *source,
                              const std::vector<size_t> &starts,
                              std::vector<uint8_t> *destination,
                              size_t base,
@@ -850,11 +888,19 @@ std::vector<uint8_t> OFRPostOrderControls(
     size_t n_left,
     size_t n_right)
 {
+  return OFRPostOrderControls(controls.data(), controls.size(),
+                              n, n_left, n_right);
+}
+
+std::vector<uint8_t> OFRPostOrderControls(
+    const uint8_t *controls, size_t control_count,
+    size_t n, size_t n_left, size_t n_right)
+{
   ValidateCapacities(n, n_left, n_right);
   if (!IsBalancedPowerOfTwo(n, n_left, n_right))
     throw std::invalid_argument("Postorder OFR requires balanced power-of-two capacities");
   const size_t required = OFRControlCountImpl(n, n_left, n_right);
-  if (controls.size() != required)
+  if (controls == NULL || control_count != required)
     throw std::length_error("OFR control array length mismatch");
 
   std::vector<size_t> starts(n);
@@ -889,16 +935,36 @@ void OFRApplyPreparedInPlace(unsigned char *data,
                              size_t n_right,
                              size_t block_size)
 {
+  OFRApplyPreparedInPlace(data, controls.data(), controls.size(),
+                          n, n_left, n_right, block_size);
+}
+
+void OFRApplyPreparedInPlace(unsigned char *data,
+                             const uint8_t *controls,
+                             size_t control_count,
+                             size_t n,
+                             size_t n_left,
+                             size_t n_right,
+                             size_t block_size)
+{
   ValidateCapacities(n, n_left, n_right);
   size_t data_bytes = 0;
   if (data == NULL || block_size == 0 ||
       MulOverflowSize(n, block_size, &data_bytes))
     throw std::invalid_argument("Invalid OFR data dimensions");
   (void)data_bytes;
+  if (n_left == 0 || n_right == 0)
+  {
+    if (control_count != 0)
+      throw std::logic_error("OFR control consumption mismatch");
+    return;
+  }
+  if (controls == NULL)
+    throw std::invalid_argument("Invalid OFR data dimensions");
 
   const size_t next = OFRApplyStrided(
       data, controls, n, n_left, n_right, block_size, 1, 0);
-  if (next != controls.size())
+  if (next != control_count)
     throw std::logic_error("OFR control consumption mismatch");
 }
 
@@ -987,15 +1053,25 @@ void OFRApplyPreparedPostOrderInPlace(
     size_t n_right,
     size_t block_size)
 {
+  OFRApplyPreparedPostOrderInPlace(
+      data, postorder_controls.data(), postorder_controls.size(),
+      n, n_left, n_right, block_size);
+}
+
+void OFRApplyPreparedPostOrderInPlace(
+    unsigned char *data, const uint8_t *postorder_controls,
+    size_t control_count, size_t n, size_t n_left, size_t n_right,
+    size_t block_size)
+{
   ValidateCapacities(n, n_left, n_right);
   size_t data_bytes = 0;
   if (!IsBalancedPowerOfTwo(n, n_left, n_right) ||
-      data == NULL || block_size == 0 ||
+      data == NULL || postorder_controls == NULL || block_size == 0 ||
       MulOverflowSize(n, block_size, &data_bytes))
     throw std::invalid_argument("Invalid postorder OFR dimensions");
   (void)data_bytes;
 
-  const uint8_t *control_data = postorder_controls.data();
+  const uint8_t *control_data = postorder_controls;
   size_t next = 0;
 #ifndef BEFTS_MODE
   if (block_size == 4)
@@ -1026,8 +1102,35 @@ void OFRApplyPreparedPostOrderInPlace(
     next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
                                GenericGate());
 
-  if (next != postorder_controls.size())
+  if (next != control_count)
     throw std::logic_error("OFR postorder control consumption mismatch");
+}
+
+void OFRApplyWordsInPlace(
+    size_t *rows, size_t words_per_row,
+    const std::vector<uint8_t> &controls, size_t position,
+    size_t n, size_t n_left, size_t n_right)
+{
+  ValidateCapacities(n, n_left, n_right);
+  size_t row_words = 0;
+  if (rows == NULL || words_per_row == 0 ||
+      MulOverflowSize(n, words_per_row, &row_words))
+    throw std::invalid_argument("Invalid OFR membership dimensions");
+  (void)row_words;
+  const size_t required = OFRControlCountImpl(n, n_left, n_right);
+  if (position > controls.size() || required > controls.size() - position)
+    throw std::length_error("OFR membership replay exceeds control tape");
+  uint8_t invalid = 0;
+  for (size_t i = 0; i < required; ++i)
+    invalid = static_cast<uint8_t>(invalid | (controls[position + i] >> 2U));
+  if (invalid != 0)
+    throw std::invalid_argument("Invalid OFR control word");
+  const size_t next = OFRApplyWordsStrided(
+      rows, words_per_row,
+      required == 0 ? NULL : controls.data() + position,
+      n, n_left, n_right, 1, 0);
+  if (next != required)
+    throw std::logic_error("OFR membership replay count mismatch");
 }
 
 OFRControlReadResult OFRControlRead(const unsigned char *data,
@@ -1057,14 +1160,15 @@ OFRControlReadResult OFRControlRead(const unsigned char *data,
 
   std::vector<unsigned char> work(data, data + data_bytes);
   const size_t next = OFRApplyStrided(
-      work.data(), controls, n, n_left, n_right, block_size, 1, position);
-  if (next != position + required)
+      work.data(), required == 0 ? NULL : controls.data() + position,
+      n, n_left, n_right, block_size, 1, 0);
+  if (next != required)
     throw std::logic_error("OFR control consumption mismatch");
   OFRControlReadResult result;
   const size_t left_bytes = n_left * block_size;
   result.left.assign(work.begin(), work.begin() + left_bytes);
   result.right.assign(work.begin() + left_bytes, work.end());
-  result.next_pos = next;
+  result.next_pos = position + next;
   return result;
 }
 

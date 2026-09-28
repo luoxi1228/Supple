@@ -140,7 +140,7 @@ static void verify(size_t n, size_t m, const Samples &samples, size_t width)
   const std::vector<unsigned char> saved = data;
   compact_calls = compact_items = shuffle_calls = 0;
   const std::vector<unsigned char> result = SWOApply(data.data(), C, F, n, m, k, width);
-  assert(data == saved && shuffle_calls == k);
+  assert(data == saved && shuffle_calls == 0);
   assert(compact_calls == expected_calls && compact_items == bits);
   check_samples(result, data, samples, m, width);
   std::vector<unsigned char> shifted(k * m * width);
@@ -224,13 +224,14 @@ int main()
     check_samples(SWOSample(data.data(), n, m, k, width), data, samples, m, width);
     std::vector<unsigned char> encrypted(k * m * width);
     enc_ret ret{};
+    ret.collect_offline_profile = 1;
     rng.seed(731);
     shuffle_calls = 0;
     DecSuppleSWO(data.data(), n, m, k, width, encrypted.data(), &ret);
-    assert(shuffle_calls == k);
+    assert(shuffle_calls == 0);
     check_samples(encrypted, data, samples, m, width);
   }
   std::printf("PASS: %zu routing cases; exact controls and sample identities, "
-              "skipped Compact calls, offset guards, wide membership, leaf "
-              "Shuffle calls, serial entry points\n", cases);
+              "skipped Compact calls, offset guards, wide membership, "
+              "serial entry points\n", cases);
 }

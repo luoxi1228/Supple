@@ -42,6 +42,11 @@ FIELDS = (
 PROFILE_FIELDS = (
     "route_ms", "reorder_ms", "copy_ms", "shuffle_ms", "other_ms",
 )
+OFFLINE_FIELDS = (
+    "mark_ms", "count_ms", "swo_write_ms", "tags_ms", "normalize_ms",
+    "ofr_write_ms", "replay_ms", "project_ms", "prepare_ms", "other_offline_ms",
+    "offline_heap_peak_bytes", "total_heap_peak_bytes",
+)
 
 
 def main():
@@ -53,6 +58,8 @@ def main():
     parser.add_argument("--trials", type=int, default=3)
     parser.add_argument("--profile", action="store_true",
                         help="collect the same online phase breakdown for modes 6 and 8")
+    parser.add_argument("--offline-profile", action="store_true",
+                        help="collect offline phase timings and enclave heap high-water marks")
     parser.add_argument("--cases", default="baseline",
                         help="comma-separated case names, baseline, or all; wide cases need a larger enclave heap")
     args = parser.parse_args()
@@ -73,6 +80,8 @@ def main():
         parser.error(f"unknown cases: {', '.join(sorted(unknown))}")
 
     env = os.environ.copy()
+    env.pop("ONLINE_PROFILE", None)
+    env.pop("OFFLINE_PROFILE", None)
     sdk = Path(env.get("SGX_SDK", "/opt/intel/sgxsdk"))
     env["LD_LIBRARY_PATH"] = ":".join(filter(None, (
         str(sdk / "lib64"), str(application.parent),
@@ -80,6 +89,8 @@ def main():
     )))
     if args.profile:
         env["ONLINE_PROFILE"] = "1"
+    if args.offline_profile:
+        env["OFFLINE_PROFILE"] = "1"
     rows = []
     for name, n, m, k, width in CASES:
         if name not in wanted:
@@ -92,7 +103,7 @@ def main():
                                      text=True, capture_output=True, timeout=180,
                                      check=True)
                 lines = run.stdout.strip().splitlines()
-                if len(lines) != (6 if args.profile else 5):
+                if len(lines) != 5 + int(args.profile) + int(args.offline_profile):
                     raise RuntimeError(f"unexpected output for {name}, mode {mode}: "
                                        f"{run.stdout!r}; stderr={run.stderr!r}")
                 values = [float(value) for value in lines[:5]]
@@ -101,20 +112,33 @@ def main():
                                        f"{values}")
                 phases = []
                 if args.profile:
-                    tokens = lines[5].split(",")
+                    tokens = next((line.split(",") for line in lines[5:]
+                                   if line.startswith("PROFILE,")), [])
                     if len(tokens) != 6 or tokens[0] != "PROFILE":
-                        raise RuntimeError(f"invalid phase output: {lines[5]!r}")
+                        raise RuntimeError(f"invalid online phase output: {lines[5:]!r}")
                     phases = [float(token) for token in tokens[1:]]
                     if abs(sum(phases) - values[3]) > 0.05:
                         raise RuntimeError(f"phase sum differs from online time: {phases}")
-                rows.append((name, n, m, k, width, trial, mode, *values, *phases))
+                offline_phases = []
+                if args.offline_profile:
+                    tokens = next((line.split(",") for line in lines[5:]
+                                   if line.startswith("OFFLINE_PROFILE,")), [])
+                    if len(tokens) != 13:
+                        raise RuntimeError(f"invalid offline phase output: {lines[5:]!r}")
+                    offline_phases = [float(token) for token in tokens[1:11]]
+                    offline_phases += [int(token) for token in tokens[11:]]
+                    if abs(sum(offline_phases[:10]) - values[2]) > 0.1:
+                        raise RuntimeError(f"phase sum differs from offline time: {offline_phases}")
+                rows.append((name, n, m, k, width, trial, mode, *values,
+                             *phases, *offline_phases))
                 print(name, trial, mode, *(f"{value:.3f}" for value in values[:4]),
                       flush=True)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", newline="") as output:
         writer = csv.writer(output, lineterminator="\n")
-        writer.writerow(FIELDS + PROFILE_FIELDS if args.profile else FIELDS)
+        writer.writerow(FIELDS + (PROFILE_FIELDS if args.profile else ()) +
+                        (OFFLINE_FIELDS if args.offline_profile else ()))
         writer.writerows(rows)
 
 

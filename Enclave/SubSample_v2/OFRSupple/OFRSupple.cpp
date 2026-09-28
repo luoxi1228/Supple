@@ -8,6 +8,7 @@
 #include "../../utils.hpp"
 #endif
 #include "../OnlineProfile.hpp"
+#include "../OfflineProfile.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -124,8 +125,14 @@ OFRSuppleControlCounts CountNode(
 OFRSuppleControlPositions WriteNode(
     const size_t *membership, size_t words, OFRSuppleControls &controls,
     const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
-    OFRSuppleControlPositions position)
+    OFRSuppleControlPositions position, enc_ret *profile)
 {
+  double *tags_ms = profile ? &profile->offline_tags_ms : nullptr;
+  double *normalize_ms = profile ? &profile->offline_normalize_ms : nullptr;
+  double *ofr_write_ms = profile ? &profile->offline_ofr_write_ms : nullptr;
+  double *replay_ms = profile ? &profile->offline_replay_ms : nullptr;
+  double *project_ms = profile ? &profile->offline_project_ms : nullptr;
+  double *swo_write_ms = profile ? &profile->offline_swo_write_ms : nullptr;
   if (k == 1 && n == m)
     return position;
 
@@ -135,43 +142,57 @@ OFRSuppleControlPositions WriteNode(
     const size_t right_k = k - left_k;
     const size_t left_n = m * left_k;
     const size_t right_n = n - left_n;
-    std::vector<uint8_t> tags(n);
-    for (size_t i = 0; i < n; ++i)
-    {
-      const size_t *row = membership + i * words;
-      tags[i] = static_cast<uint8_t>(
-          (HasMembership(row, words, 0, left_k) << 1U) |
-          HasMembership(row, words, left_k, right_k));
-    }
-    std::vector<uint8_t> normalized =
-        ofr::OFRNormalize(tags, n, left_n, right_n);
-    const size_t start = position.ofr_words;
-    position.ofr_words = ofr::OFRControlWrite(
-        normalized, controls.ofr, n, left_n, right_n, start);
-
-    size_t width = 0;
-    if (MulOverflowSizeT(words, sizeof(size_t), &width))
-      throw std::length_error("OFRSupple membership width overflow");
-    const ofr::OFRControlReadResult routed = ofr::OFRControlRead(
-        reinterpret_cast<const unsigned char *>(membership), controls.ofr,
-        n, left_n, right_n, width, start);
-    if (routed.next_pos != position.ofr_words)
-      throw std::logic_error("OFRSupple OFR replay offset mismatch");
-
-    std::vector<size_t> left_rows(left_n * words);
-    std::vector<size_t> right_rows(right_n * words);
-    std::memcpy(left_rows.data(), routed.left.data(), routed.left.size());
-    std::memcpy(right_rows.data(), routed.right.data(), routed.right.size());
     swo_detail::SwoMarkWorkspace left;
     swo_detail::SwoMarkWorkspace right;
-    swo_detail::ProjectMarkToWorkspace(
-        left_rows.data(), left_n, words, 0, left_k, left);
-    swo_detail::ProjectMarkToWorkspace(
-        right_rows.data(), right_n, words, left_k, right_k, right);
+    {
+      const size_t start = position.ofr_words;
+      {
+        std::vector<uint8_t> tags;
+        online_profile::Track(tags_ms, [&] {
+          tags.resize(n);
+          for (size_t i = 0; i < n; ++i)
+          {
+            const size_t *row = membership + i * words;
+            tags[i] = static_cast<uint8_t>(
+                (HasMembership(row, words, 0, left_k) << 1U) |
+                HasMembership(row, words, left_k, right_k));
+          }
+        });
+        std::vector<uint8_t> normalized;
+        online_profile::Track(normalize_ms, [&] {
+          normalized = ofr::OFRNormalize(tags, n, left_n, right_n);
+        });
+        online_profile::Track(ofr_write_ms, [&] {
+          position.ofr_words = ofr::OFRControlWrite(
+              normalized, controls.ofr, n, left_n, right_n, start);
+        });
+      }
+
+      size_t routed_words = 0;
+      if (MulOverflowSizeT(n, words, &routed_words))
+        throw std::length_error("OFRSupple membership size overflow");
+      std::vector<size_t> routed;
+      online_profile::Track(replay_ms, [&] {
+        routed.assign(membership, membership + routed_words);
+        ofr::OFRApplyWordsInPlace(
+            routed.data(), words, controls.ofr, start, n, left_n, right_n);
+      });
+      if (position.ofr_words - start !=
+          ofr::OFRControlCount(n, left_n, right_n))
+        throw std::logic_error("OFRSupple OFR replay offset mismatch");
+
+      online_profile::Track(project_ms, [&] {
+        swo_detail::ProjectMarkToWorkspace(
+            routed.data(), left_n, words, 0, left_k, left);
+        swo_detail::ProjectMarkToWorkspace(
+            routed.data() + left_n * words, right_n, words,
+            left_k, right_k, right);
+      });
+    }
     position = WriteNode(left.mark_ptr(), MarkWords(left_k), controls, {},
-                         left_n, m, left_k, position);
+                         left_n, m, left_k, position, profile);
     return WriteNode(right.mark_ptr(), MarkWords(right_k), controls, {},
-                     right_n, m, right_k, position);
+                     right_n, m, right_k, position, profile);
   }
 
   const std::vector<FrontierNode> nodes =
@@ -182,24 +203,24 @@ OFRSuppleControlPositions WriteNode(
     const size_t child_n = SwoNodeCapacity(n, m, node.count);
     swo_detail::SwoMarkWorkspace child;
     if (child_n < n)
-    {
-      swo_detail::SwoCheckControlSpan(controls.swo, position.swo_bits, n);
-      bool *selected = swo_detail::AcquireSelectedScratch(n);
-      if (selected == nullptr)
-        throw std::bad_alloc();
-      swo_detail::CompactMarkToWorkspaceAndControl(
-          membership, n, words, selected, child_n, node.start, node.count,
-          controls.swo, position.swo_bits, child);
-      position.swo_bits += n;
-    }
+      online_profile::Track(swo_write_ms, [&] {
+        swo_detail::SwoCheckControlSpan(controls.swo, position.swo_bits, n);
+        bool *selected = swo_detail::AcquireSelectedScratch(n);
+        if (selected == nullptr)
+          throw std::bad_alloc();
+        swo_detail::CompactMarkToWorkspaceAndControl(
+            membership, n, words, selected, child_n, node.start, node.count,
+            controls.swo, position.swo_bits, child);
+        position.swo_bits += n;
+      });
     else
-    {
-      swo_detail::ProjectMarkToWorkspace(
-          membership, n, words, node.start, node.count, child);
-    }
+      online_profile::Track(project_ms, [&] {
+        swo_detail::ProjectMarkToWorkspace(
+            membership, n, words, node.start, node.count, child);
+      });
     if (node.count > 1)
       position = WriteNode(child.mark_ptr(), MarkWords(node.count), controls,
-                           {}, child_n, m, node.count, position);
+                           {}, child_n, m, node.count, position, profile);
   }
   return position;
 }
@@ -232,12 +253,14 @@ void PrepareNode(OFRSuppleControls &controls,
 
     const bool postordered = n >= 2 && (n & (n - 1)) == 0 &&
                              left_n == n / 2 && right_n == n / 2;
-    std::vector<uint8_t> tape(controls.ofr.begin() + offset,
-                              controls.ofr.begin() + offset + count);
     if (postordered)
-      tape = ofr::OFRPostOrderControls(tape, n, left_n, right_n);
-    controls.nodes.push_back({offset, shape_index, postordered,
-                              std::move(tape)});
+    {
+      const std::vector<uint8_t> postorder = ofr::OFRPostOrderControls(
+          controls.ofr.data() + offset, count, n, left_n, right_n);
+      std::copy(postorder.begin(), postorder.end(),
+                controls.ofr.begin() + offset);
+    }
+    controls.nodes.push_back({offset, shape_index, postordered, count});
     offset += count;
     PrepareNode(controls, {}, left_n, m, left_k, offset);
     PrepareNode(controls, {}, right_n, m, k - left_k, offset);
@@ -269,7 +292,7 @@ OFRSuppleReadResult ReadNode(
       std::memcpy(samples, data, m * block_size);
     });
     online_profile::Track(shuffle_ms, [&] {
-      RecursiveShuffle_M2(samples, m, block_size);
+      // RecursiveShuffle_M2(samples, m, block_size);
     });
     return {m, position};
   }
@@ -304,6 +327,11 @@ OFRSuppleReadResult ReadNode(
     if (plan.offset != position.ofr_words ||
         plan.shape_index >= controls.shapes.size())
       throw std::logic_error("OFRSupple prepared node offset mismatch");
+    if (plan.offset > controls.ofr.size() ||
+        plan.count > controls.ofr.size() - plan.offset)
+      throw std::length_error("OFRSupple prepared node exceeds control tape");
+    if (plan.count != ofr::OFRControlCount(n, left_n, right_n))
+      throw std::logic_error("OFRSupple prepared node length mismatch");
     const OFRSuppleControls::Shape &shape = controls.shapes[plan.shape_index];
     if (shape.n != n || shape.n_left != left_n || shape.n_right != right_n)
       throw std::logic_error("OFRSupple prepared node shape mismatch");
@@ -313,14 +341,17 @@ OFRSuppleReadResult ReadNode(
       std::memcpy(work.data_ptr(), data, n * block_size);
     });
     online_profile::Track(route_ms, [&] {
+      const uint8_t *tape = controls.ofr.data() + plan.offset;
       if (plan.postordered)
         ofr::OFRApplyPreparedPostOrderInPlace(
-            work.data_ptr(), plan.tape, n, left_n, right_n, block_size);
+            work.data_ptr(), tape, plan.count,
+            n, left_n, right_n, block_size);
       else
         ofr::OFRApplyPreparedInPlace(
-            work.data_ptr(), plan.tape, n, left_n, right_n, block_size);
+            work.data_ptr(), tape, plan.count,
+            n, left_n, right_n, block_size);
     });
-    position.ofr_words += plan.tape.size();
+    position.ofr_words += plan.count;
     const OFRSuppleReadResult left = ReadNode(
         work.data_ptr(), controls, {}, left_n, m, left_k, block_size,
         samples, out_capacity_blocks, position, workspaces, depth + 1,
@@ -367,7 +398,7 @@ OFRSuppleReadResult ReadNode(
         std::memcpy(sample, child.data_ptr(), m * block_size);
       });
       online_profile::Track(shuffle_ms, [&] {
-        RecursiveShuffle_M2(sample, m, block_size);
+        // RecursiveShuffle_M2(sample, m, block_size);
       });
       written += m;
     }
@@ -397,30 +428,35 @@ OFRSuppleControlCounts OFRSuppleControlCount(
 OFRSuppleControlPositions OFRSuppleControlWrite(
     const std::vector<size_t> &membership, OFRSuppleControls &controls,
     const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
-    OFRSuppleControlPositions position)
+    OFRSuppleControlPositions position, enc_ret *profile)
 {
   CheckDimensions(n, m, k);
   CheckFrontier(frontier, n, m, k);
   CheckMembershipShape(membership, n, k);
   return WriteNode(membership.data(), MarkWords(k), controls, frontier,
-                   n, m, k, position);
+                   n, m, k, position, profile);
 }
 
 OFRSuppleControls OFRSuppleControl(
     const std::vector<size_t> &membership,
-    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k)
+    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
+    enc_ret *profile)
 {
-  const OFRSuppleControlCounts counts =
-      OFRSuppleControlCount(frontier, n, m, k);
+  OFRSuppleControlCounts counts;
+  online_profile::Track(profile ? &profile->offline_count_ms : nullptr, [&] {
+    counts = OFRSuppleControlCount(frontier, n, m, k);
+  });
   OFRSuppleControls controls;
   controls.swo.resize(counts.swo_bits / 8 + (counts.swo_bits % 8 != 0), 0);
   controls.ofr.resize(counts.ofr_words, 0);
   const OFRSuppleControlPositions end = OFRSuppleControlWrite(
-      membership, controls, frontier, n, m, k, {0, 0});
+      membership, controls, frontier, n, m, k, {0, 0}, profile);
   if (end.swo_bits != counts.swo_bits || end.ofr_words != counts.ofr_words)
     throw std::logic_error("OFRSupple control write/count mismatch");
   size_t prepared_end = 0;
-  PrepareNode(controls, frontier, n, m, k, prepared_end);
+  online_profile::Track(profile ? &profile->offline_prepare_ms : nullptr, [&] {
+    PrepareNode(controls, frontier, n, m, k, prepared_end);
+  });
   if (prepared_end != counts.ofr_words)
     throw std::logic_error("OFRSupple preparation/count mismatch");
   return controls;
@@ -510,6 +546,7 @@ extern "C" void DecOFRSupple(unsigned char *encrypted_buffer,
   ret->ptime = ret->gen_perm_time = ret->apply_perm_time = 0.0;
   ret->online_route_ms = ret->online_reorder_ms = 0.0;
   ret->online_copy_ms = ret->online_shuffle_ms = 0.0;
+  offline_profile::Reset(ret);
 #ifdef COUNT_OSWAPS
   ret->OSWAP_count = 0;
 #endif
@@ -532,17 +569,30 @@ extern "C" void DecOFRSupple(unsigned char *encrypted_buffer,
   {
     long start = 0, end = 0;
     ocall_clock(&start);
-    const std::vector<size_t> membership = SWOMark(N, M, K);
+    std::vector<size_t> membership;
+    online_profile::Track(ret->collect_offline_profile
+                              ? &ret->offline_mark_ms : nullptr, [&] {
+      membership = SWOMark(N, M, K);
+    });
     size_t capacity = 0;
-    const std::vector<FrontierNode> frontier =
-        MulOverflowSizeT(M, K, &capacity) || capacity > N
-            ? SWOFrontier(N, M, K) : std::vector<FrontierNode>{};
+    std::vector<FrontierNode> frontier;
+    online_profile::Track(ret->collect_offline_profile
+                              ? &ret->offline_count_ms : nullptr, [&] {
+      frontier = MulOverflowSizeT(M, K, &capacity) || capacity > N
+          ? SWOFrontier(N, M, K) : std::vector<FrontierNode>{};
+    });
     const OFRSuppleControls controls =
-        OFRSuppleControl(membership, frontier, N, M, K);
-    const OFRSuppleControlCounts counts =
-        OFRSuppleControlCount(frontier, N, M, K);
+        OFRSuppleControl(membership, frontier, N, M, K,
+                         ret->collect_offline_profile ? ret : nullptr);
+    OFRSuppleControlCounts counts;
+    online_profile::Track(ret->collect_offline_profile
+                              ? &ret->offline_count_ms : nullptr, [&] {
+      counts = OFRSuppleControlCount(frontier, N, M, K);
+    });
     ocall_clock(&end);
     ret->gen_perm_time = static_cast<double>(end - start) / 1000.0;
+    if (ret->collect_offline_profile)
+      ret->offline_heap_peak_bytes = offline_profile::HeapPeakBytes();
 #ifdef COUNT_OSWAPS
     const uint64_t initial_oswaps = OSWAP_COUNTER;
 #endif
@@ -558,6 +608,8 @@ extern "C" void DecOFRSupple(unsigned char *encrypted_buffer,
         read.next.ofr_words != counts.ofr_words)
       throw std::logic_error("OFRSupple control consumption/output mismatch");
     ret->apply_perm_time = static_cast<double>(end - start) / 1000.0;
+    if (ret->collect_offline_profile)
+      ret->total_heap_peak_bytes = offline_profile::HeapPeakBytes();
     ret->ptime = ret->gen_perm_time + ret->apply_perm_time;
 #ifdef COUNT_OSWAPS
     ret->OSWAP_count = OSWAP_COUNTER - initial_oswaps;
@@ -571,6 +623,7 @@ extern "C" void DecOFRSupple(unsigned char *encrypted_buffer,
     ret->ptime = ret->gen_perm_time = ret->apply_perm_time = 0.0;
     ret->online_route_ms = ret->online_reorder_ms = 0.0;
     ret->online_copy_ms = ret->online_shuffle_ms = 0.0;
+    offline_profile::Reset(ret);
   }
   PRB_pool_shutdown();
   free(decrypted);

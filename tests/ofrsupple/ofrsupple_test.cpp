@@ -64,12 +64,19 @@ static void Verify(size_t n, size_t m, const Samples &samples, size_t width)
       OFRSuppleControl(membership, frontier, n, m, k);
   assert(controls.swo.size() == (counts.swo_bits + 7) / 8);
   assert(controls.ofr.size() == counts.ofr_words);
+  size_t prepared_words = 0;
+  for (const OFRSuppleControls::Node &node : controls.nodes)
+  {
+    assert(node.offset == prepared_words);
+    prepared_words += node.count;
+  }
+  assert(prepared_words == counts.ofr_words);
 
   const std::vector<unsigned char> data = Records(n, width);
   const size_t before_shuffle = shuffle_calls;
   const std::vector<unsigned char> result = OFRSuppleApply(
       data.data(), controls, frontier, n, m, k, width);
-  assert(shuffle_calls == before_shuffle + k);
+  assert(shuffle_calls == before_shuffle);
   CheckSamples(result, data, samples, m, width);
 
   // Both streams can start at nonzero offsets without changing nearby controls.
@@ -93,9 +100,6 @@ static void Verify(size_t n, size_t m, const Samples &samples, size_t width)
         : ((original.swo[i / 8] >> (i % 8)) & 1U) != 0;
     assert(bit == expected);
   }
-  for (size_t i = 0; i < shifted.ofr.size(); ++i)
-    assert(shifted.ofr[i] == (i >= ofr_offset && i < end.ofr_words
-        ? controls.ofr[i - ofr_offset] : original.ofr[i]));
   std::vector<unsigned char> shifted_output(k * m * width);
   const OFRSuppleReadResult read = OFRSuppleControlRead(
       data.data(), shifted, frontier, n, m, k, width,
@@ -104,6 +108,16 @@ static void Verify(size_t n, size_t m, const Samples &samples, size_t width)
   assert(read.next.swo_bits == end.swo_bits);
   assert(read.next.ofr_words == end.ofr_words);
   assert(shifted_output == result);
+  OFRSuppleControls raw;
+  raw.swo.resize((counts.swo_bits + 7) / 8);
+  raw.ofr.resize(counts.ofr_words);
+  const OFRSuppleControlPositions raw_end = OFRSuppleControlWrite(
+      membership, raw, frontier, n, m, k, {0, 0});
+  assert(raw_end.swo_bits == counts.swo_bits);
+  assert(raw_end.ofr_words == counts.ofr_words);
+  for (size_t i = 0; i < shifted.ofr.size(); ++i)
+    assert(shifted.ofr[i] == (i >= ofr_offset && i < end.ofr_words
+        ? raw.ofr[i - ofr_offset] : original.ofr[i]));
   ++checked;
 }
 
@@ -176,6 +190,7 @@ int main()
                samples, m, width);
   std::vector<unsigned char> encrypted(k * m * width);
   enc_ret ret{};
+  ret.collect_offline_profile = 1;
   rng.seed(731);
   DecOFRSupple(const_cast<unsigned char *>(data.data()), n, m, k, width,
                encrypted.data(), &ret);

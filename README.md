@@ -84,6 +84,25 @@ For a route, reorder, copy, and Shuffle breakdown, see
 `RESULTS/ofrsupple_online_prepared.md`; the paired SIM benchmark supports
 `--profile` and writes those measurements to separate CSV columns.
 
+The default `run_experiments.py` run measures offline and online totals without
+offline phase clocks. Pass `--offline-profile` to collect offline phase timings
+and the SGX heap high-water mark for modes 6 and 8. This runs each case a
+second time for diagnostics; the regular result CSV always uses the run
+without offline phase clocks. The diagnostic run writes
+`Supple_offline_profile.csv` and `OFRSupple_offline_profile.csv` beside the
+regular results. `mark_ms`, `count_ms`, `swo_write_ms`, `tags_ms`,
+`normalize_ms`, `ofr_write_ms`, `replay_ms`, `project_ms`, `prepare_ms`, and
+`other_ms` sum to the diagnostic run's offline time, which can differ from the
+unprofiled `gen_perm(offline)` in the regular CSV. The two peak fields are
+bytes recorded by the SGX runtime's `g_peak_heap_used`: the offline mark is
+captured in the first round, and the total mark is the maximum
+across all rounds.
+These are process-lifetime heap growth high-water marks, including enclave
+setup; they are neither live allocation counts nor EPC usage.
+Profiling adds clock OCALLs to the timed offline phase. Previously generated
+offline profile CSVs remain on disk when profiling is disabled; they are not
+updated by a normal run.
+
 ### CLI Parameters (`run_experiments.py`)
 
 - `--modes`: comma-separated mode list
@@ -92,7 +111,9 @@ For a route, reorder, copy, and Shuffle breakdown, see
 - `--k`: comma-separated the number of samples (used when `--k-select 2`)
 - `--k-select`: `1` => `k = max(1, int(1/p))`; `2` => use `--k`
 - `--block-sizes`: comma-separated block sizes
-- `--repeat`: repeat count per config
+- `--repeat`: measured rounds per configuration (default `5`)
+- `--warmup`: rounds excluded from the average before measurement (default `1`;
+    use `0` to measure from the first round)
 - `--results-folder`: output directory
 - `--overwrite`: overwrite each mode CSV on first write in current script process
 
@@ -106,10 +127,11 @@ For a route, reorder, copy, and Shuffle breakdown, see
 - `6`: Supple
 - `7`: Supple_parallel
 - `8`: OFRSupple
+- `9`: ShuffleBasedSWO; shuffle all records once per sample, then take the first `m`
 
 ### `k` Selection Behavior
 
-- Modes `4`, `5`, `6`, `7`, and `8`:
+- Modes `4`, `5`, `6`, `7`, `8`, and `9`:
     - `k-select=1`: use derived `k = max(1, int(1/p))`
     - `k-select=2`: sweep values from `--k`
 - Mode `2`: always uses `k = max(1, int(1/p))`
@@ -121,7 +143,7 @@ For a route, reorder, copy, and Shuffle breakdown, see
 
 Results are written under `--results-folder` (default `RESULTS`).
 
-Each mode is appended to one headerless CSV file:
+Each mode writes to one CSV file:
 
 - `<RESULTS_FOLDER>/PSQF_single.csv`
 - `<RESULTS_FOLDER>/PSQF_SWO.csv`
@@ -131,6 +153,12 @@ Each mode is appended to one headerless CSV file:
 - `<RESULTS_FOLDER>/Supple.csv`
 - `<RESULTS_FOLDER>/Supple_parallel.csv`
 - `<RESULTS_FOLDER>/OFRSupple.csv`
+- `<RESULTS_FOLDER>/ShuffleBasedSWO.csv`
+
+Modes `2`, `6`, `8`, and `9` write the column names on the first line and
+leave one blank line between separate executions of `run_experiments.py`.
+Existing headerless files for these modes receive the header when the next
+execution appends results. Other modes retain their existing headerless format.
 
 
 ## 3.1 Common Prefix Columns
@@ -145,11 +173,19 @@ Columns:
 
 `block_size, p, n, k, ecall_time, ptime, oswaps, heap_est_mb`
 
-## 3.3 Mode 4/5/6/7/8
+Mode `2` uses `ecall_time_ms` and `ptime_ms` in its CSV header.
+
+## 3.3 Mode 4/5/6/7/8/9
 
 Columns:
 
 `block_size, p, n, k, ecall_time, ptime, gen_perm(offline), apply_perm(online), oswaps, heap_est_mb`
+
+Modes `6`, `8`, and `9` use `ecall_time_ms`, `ptime_ms`,
+`gen_perm_offline_ms`, and `apply_perm_online_ms` in their CSV headers.
+
+Mode `9` has no offline phase: `gen_perm=0` and `apply_perm=ptime`. Use `k=1`
+for a single sample and `k>1` for repeated shuffle-and-truncate sampling.
 
 Where:
 

@@ -135,7 +135,8 @@ SGXSSL_INCLUDE_PATH := /opt/intel/sgxssl/include/
 
 Enclave_Cpp_Files := Enclave/Enclave.cpp Enclave/utils.cpp Enclave/ORShuffle/RecursiveShuffle.cpp \
 		Enclave/ObliviousPrimitives.cpp Enclave/ORCompaction/TightCompaction.cpp Enclave/ORCompaction/TightCompaction_v2.cpp \
-		Enclave/SubSample/SubSample.cpp Enclave/PSQF19/SWO/PSQF_SWO.cpp \
+		Enclave/SubSample/SubSample.cpp Enclave/Baseline/SWO/PSQF_SWO.cpp \
+		Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.cpp \
 		Enclave/SubSample_v2/SWO/SuppleSWO.cpp Enclave/SubSample_v2/SWO/helper.cpp \
 		Enclave/SubSample_v2/OFR/OFR.cpp Enclave/SubSample_v2/OFR/helper.cpp Enclave/SubSample_v2/OFR/OFRBenchmark.cpp \
 		Enclave/SubSample_v2/OFRSupple/OFRSupple.cpp \
@@ -166,6 +167,7 @@ Enclave_Link_Flags := $(SGX_COMMON_CFLAGS) -Wl,--no-undefined -nostdlib -nodefau
 
 
 Enclave_Cpp_Objects := $(Enclave_Cpp_Files:.cpp=.o)
+
 
 Enclave_Name := enclave.so
 Signed_Enclave_Name := enclave.signed.so
@@ -215,6 +217,9 @@ else
 endif
 endif
 
+# enc_ret is shared across the generated ECALL bridge and both C++ sides.
+$(App_Cpp_Objects) $(Enclave_Cpp_Objects) Untrusted/Enclave_u.o Enclave/Enclave_t.o: Globals.hpp
+
 run: all
 ifneq ($(Build_Mode), HW_RELEASE)
 	@$(CURDIR)/$(App_Name)
@@ -223,7 +228,7 @@ endif
 
 ######## App Objects ########
 
-Untrusted/Enclave_u.c: $(SGX_EDGER8R) Enclave/Enclave.edl
+Untrusted/Enclave_u.c: $(SGX_EDGER8R) Enclave/Enclave.edl Enclave/Baseline/SWO/PSQF_SWO.edl Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.edl
 	@cd Untrusted && $(SGX_EDGER8R) --untrusted ../Enclave/Enclave.edl --search-path ../Enclave --search-path $(SGX_SDK)/include
 	@echo "GEN  =>  $@"
 
@@ -248,7 +253,7 @@ $(App_Name): Untrusted/Enclave_u.o $(App_Cpp_Objects)
 
 ######## Enclave Objects ########
 
-Enclave/Enclave_t.c: $(SGX_EDGER8R) Enclave/Enclave.edl
+Enclave/Enclave_t.c: $(SGX_EDGER8R) Enclave/Enclave.edl Enclave/Baseline/SWO/PSQF_SWO.edl Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.edl
 	@cd Enclave && $(SGX_EDGER8R) --trusted ../Enclave/Enclave.edl --search-path ../Enclave --search-path $(SGX_SDK)/include
 	@echo "GEN  =>  $@"
 

@@ -27,6 +27,8 @@ OFRCOMPACT_BENCH_OBJS = ApplicationOFRCompact.o
 %.o: %.cpp
 	g++ -std=c++11 -O0 -ggdb -c $<
 
+Application.o: ../Globals.hpp
+
 application: $(SAN_OBJS) libOSort.so
 	g++ -std=c++11 $(SAN_OBJS) $(APP_LINK_FLAGS) -o $@
 

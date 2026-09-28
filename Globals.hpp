@@ -87,6 +87,20 @@ Global Flags will sit in CONFIG.h
     double online_reorder_ms;
     double online_copy_ms;
     double online_shuffle_ms;
+
+    // Optional offline breakdown (ms) and SGX heap high-water marks (bytes).
+    int collect_offline_profile;
+    double offline_mark_ms;
+    double offline_count_ms;
+    double offline_swo_write_ms;
+    double offline_tags_ms;
+    double offline_normalize_ms;
+    double offline_ofr_write_ms;
+    double offline_replay_ms;
+    double offline_project_ms;
+    double offline_prepare_ms;
+    size_t offline_heap_peak_bytes;
+    size_t total_heap_peak_bytes;
   }enc_ret;
 
   #define __GLOBALS__

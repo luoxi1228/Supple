@@ -1,4 +1,6 @@
 #include <stdexcept>
+#include <algorithm>
+#include <cerrno>
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstdlib>
@@ -6,6 +8,7 @@
 #include <cstring>
 #include <cmath>
 #include <ctime>
+#include <limits>
 #include <openssl/evp.h>
 #include <openssl/err.h>
 #include "../Globals.hpp"
@@ -28,6 +31,8 @@ size_t M;
 size_t K;
 size_t BLOCK_SIZE;
 size_t REPEAT;
+size_t WARMUP = 1;
+size_t TOTAL_ROUNDS;
 size_t NTHREADS = 1;
 
 uint64_t NUM_ZERO_BYTES;
@@ -43,14 +48,13 @@ double calculateAve(const double *input, size_t N) {
 }
 
 void parseCommandLineArguments(int argc, char *argv[]) {
-  if (argc != (NUM_ARGUMENTS_REQUIRED + 1) &&
-      argc != (NUM_ARGUMENTS_REQUIRED + 2) &&
-      argc != (NUM_ARGUMENTS_REQUIRED + 3)) {
+  if (argc < (NUM_ARGUMENTS_REQUIRED + 1) ||
+      argc > (NUM_ARGUMENTS_REQUIRED + 4)) {
     printf("Did NOT receive the right number of command line arguments.\n"
-          "Usage: ./application <1|2|3> <N> <BLOCK_SIZE> <P> <REPEAT>\n"
-          "   or: ./application <4|5|6|8> <N> <BLOCK_SIZE> <P> <K> <REPEAT>\n"
-          "   or: ./application <7> <N> <BLOCK_SIZE> <P> <K> <NTHREADS> <REPEAT>\n\n"
-           "Oblivious SubSampling (1/2/3/4/5/6/7/8)\n"
+          "Usage: ./application <1|2|3> <N> <BLOCK_SIZE> <P> <REPEAT> [WARMUP]\n"
+          "   or: ./application <4|5|6|8|9> <N> <BLOCK_SIZE> <P> <K> <REPEAT> [WARMUP]\n"
+          "   or: ./application <7> <N> <BLOCK_SIZE> <P> <K> <NTHREADS> <REPEAT> [WARMUP]\n\n"
+           "Oblivious SubSampling (1/2/3/4/5/6/7/8/9)\n"
           "  (1) PSQF_single (shuffle all then take first N*P)\n"
            "  (2) PSQF_SWO (Algorithm 1)\n"
           "  (3) SubSample (randomly select N*P items, then compact)\n"
@@ -58,27 +62,24 @@ void parseCommandLineArguments(int argc, char *argv[]) {
            "  (5) SubSampleMulti_opt\n"
            "  (6) SuppleSWO\n"
            "  (7) SuppleSWO_parallel\n"
-           "  (8) OFRSupple\n");
+           "  (8) OFRSupple\n"
+           "  (9) ShuffleBasedSWO (shuffle and truncate K times)\n");
     exit(0);
   }
 
   MODE = atoi(argv[1]);
-  if (MODE < 1 || MODE > 8) {
-    printf("MODE must be 1, 2, 3, 4, 5, 6, 7, or 8.\n");
+  if (MODE < 1 || MODE > 9) {
+    printf("MODE must be between 1 and 9.\n");
     exit(0);
   }
 
-  if ((MODE == 4 || MODE == 5 || MODE == 6 || MODE == 8) && argc != (NUM_ARGUMENTS_REQUIRED + 2)) {
-    printf("MODE 4/5/6/8 expects K as an extra parameter.\n");
-    exit(0);
-  }
-  if (MODE == 7 && argc != (NUM_ARGUMENTS_REQUIRED + 3)) {
-    printf("MODE 7 expects K and NTHREADS as extra parameters.\n");
-    exit(0);
-  }
-  if (MODE != 4 && MODE != 5 && MODE != 6 && MODE != 7 && MODE != 8 && argc != (NUM_ARGUMENTS_REQUIRED + 1)) {
-    printf("MODE 1/2/3 expects no K parameter.\n");
-    exit(0);
+  const bool needs_k = MODE == 4 || MODE == 5 || MODE == 6 ||
+                       MODE == 8 || MODE == 9;
+  const int expected_argc = NUM_ARGUMENTS_REQUIRED + 1 +
+                            (needs_k ? 1 : 0) + (MODE == 7 ? 2 : 0);
+  if (argc != expected_argc && argc != expected_argc + 1) {
+    printf("Incorrect argument count for MODE %u.\n", MODE);
+    exit(1);
   }
 
   N = atoi(argv[2]);
@@ -92,31 +93,46 @@ void parseCommandLineArguments(int argc, char *argv[]) {
   if (M == 0) {
     M = 1;
   }
-  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 8) {
+  int requested_repeat = 0;
+  if (needs_k) {
     K = atoi(argv[5]);
-    REPEAT = atoi(argv[6]);
+    requested_repeat = atoi(argv[6]);
   } else if (MODE == 7) {
     K = atoi(argv[5]);
     NTHREADS = atoi(argv[6]);
-    REPEAT = atoi(argv[7]);
+    requested_repeat = atoi(argv[7]);
   } else {
     K = 0;
     NTHREADS = 1;
-    REPEAT = atoi(argv[5]);
+    requested_repeat = atoi(argv[5]);
   }
-
-  // To ignore the first iteration, we perform the experiment REPEAT + 1 times
-  REPEAT = REPEAT + 1;
-  if ((MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8) && K == 0) {
-    printf("MODE 4/5/6/7/8 expects K > 0\n");
+  if (requested_repeat <= 0) {
+    printf("REPEAT must be >= 1\n");
+    exit(1);
+  }
+  REPEAT = static_cast<size_t>(requested_repeat);
+  if (argc == expected_argc + 1) {
+    char *end = nullptr;
+    errno = 0;
+    const long requested_warmup = strtol(argv[expected_argc], &end, 10);
+    if (errno == ERANGE || end == argv[expected_argc] || *end != '\0' ||
+        requested_warmup < 0) {
+      printf("WARMUP must be a nonnegative integer\n");
+      exit(1);
+    }
+    WARMUP = static_cast<size_t>(requested_warmup);
+  }
+  if (WARMUP > std::numeric_limits<size_t>::max() - REPEAT) {
+    printf("WARMUP + REPEAT is too large\n");
+    exit(1);
+  }
+  TOTAL_ROUNDS = WARMUP + REPEAT;
+  if ((MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8 || MODE == 9) && K == 0) {
+    printf("MODE 4/5/6/7/8/9 expects K > 0\n");
     exit(0);
   }
   if (MODE == 7 && NTHREADS == 0) {
     printf("MODE 7 expects NTHREADS > 0\n");
-    exit(0);
-  }
-  if (REPEAT < 2) {
-    printf("REPEAT must be >= 1\n");
     exit(0);
   }
 }
@@ -138,6 +154,7 @@ int main(int argc, char *argv[]) {
 
   bool verbose_phases = !!getenv("VERBOSE_PHASES");
   const bool profile_online = !!getenv("ONLINE_PROFILE");
+  const bool profile_offline = !!getenv("OFFLINE_PROFILE");
   uint64_t phase_start, phase_end;
   double phase_time;
 
@@ -161,15 +178,18 @@ int main(int argc, char *argv[]) {
   // 2. Initialize libcrypto
   phase_start = phase_end;
 
-  double ecallTime_array[REPEAT] = {};
-  double ptime_array[REPEAT] = {};
-  double gen_perm_time_array[REPEAT] = {};
-  double apply_perm_time_array[REPEAT] = {};
-  double online_route_array[REPEAT] = {};
-  double online_reorder_array[REPEAT] = {};
-  double online_copy_array[REPEAT] = {};
-  double online_shuffle_array[REPEAT] = {};
-  size_t num_oswaps[REPEAT] = {};
+  double ecallTime_array[TOTAL_ROUNDS] = {};
+  double ptime_array[TOTAL_ROUNDS] = {};
+  double gen_perm_time_array[TOTAL_ROUNDS] = {};
+  double apply_perm_time_array[TOTAL_ROUNDS] = {};
+  double online_route_array[TOTAL_ROUNDS] = {};
+  double online_reorder_array[TOTAL_ROUNDS] = {};
+  double online_copy_array[TOTAL_ROUNDS] = {};
+  double online_shuffle_array[TOTAL_ROUNDS] = {};
+  double offline_phase_array[9][TOTAL_ROUNDS] = {};
+  size_t offline_heap_peak_bytes = 0;
+  size_t total_heap_peak_bytes = 0;
+  size_t num_oswaps[TOTAL_ROUNDS] = {};
 
   OpenSSL_add_all_algorithms();   // Initialize libcrypto
   ERR_load_crypto_strings();
@@ -227,7 +247,7 @@ int main(int argc, char *argv[]) {
 
   // Create buffer of items to shuffle
   size_t output_blocks = N;
-  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8) {
+  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8 || MODE == 9) {
     output_blocks = SampleSize * K;
   }
   size_t total_blocks = (output_blocks > N) ? output_blocks : N;
@@ -247,10 +267,10 @@ int main(int argc, char *argv[]) {
   }
 
 
-  // 6. Run the selected MODE REPEAT times
+  // 6. Run WARMUP unmeasured rounds, then REPEAT measured rounds.
   phase_start = phase_end;
 
-  for (size_t r = 0; r < REPEAT; r++) {
+  for (size_t r = 0; r < TOTAL_ROUNDS; r++) {
     size_t inc_ctr = 0;
     unsigned char iv[12];
     read(randfd, iv, 12);
@@ -313,6 +333,7 @@ int main(int argc, char *argv[]) {
 
     enc_ret ret{};
     ret.collect_online_profile = profile_online && (MODE == 6 || MODE == 8);
+    ret.collect_offline_profile = profile_offline && (MODE == 6 || MODE == 8);
     switch (MODE) {
       case 1:
         DecPSQF_single(buf, N, SampleSize, ENC_BLOCK_SIZE, buf, &ret);
@@ -411,8 +432,37 @@ int main(int argc, char *argv[]) {
         num_oswaps[r] = 0;
       #endif
         break;
+
+      case 9:
+        DecShuffleBasedSWO(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
+        ptime_array[r] = ret.ptime;
+        gen_perm_time_array[r] = ret.gen_perm_time;
+        apply_perm_time_array[r] = ret.apply_perm_time;
+#ifdef COUNT_OSWAPS
+        num_oswaps[r] = ret.OSWAP_count;
+#else
+        num_oswaps[r] = 0;
+#endif
+        break;
     }
     process_stop = rtclock();
+
+    if (ret.collect_offline_profile) {
+      const double phases[9] = {
+          ret.offline_mark_ms, ret.offline_count_ms,
+          ret.offline_swo_write_ms, ret.offline_tags_ms,
+          ret.offline_normalize_ms, ret.offline_ofr_write_ms,
+          ret.offline_replay_ms, ret.offline_project_ms,
+          ret.offline_prepare_ms};
+      for (size_t phase = 0; phase < 9; ++phase)
+        offline_phase_array[phase][r] = phases[phase];
+      // The SGX counter is cumulative. Only the first round's offline
+      // checkpoint can separate offline growth from later online growth.
+      if (r == 0)
+        offline_heap_peak_bytes = ret.offline_heap_peak_bytes;
+      total_heap_peak_bytes = std::max(total_heap_peak_bytes,
+                                       ret.total_heap_peak_bytes);
+    }
 
     ecall_time = double(process_stop - process_start) / 1000.0;
     ecallTime_array[r] = ecall_time;
@@ -431,7 +481,7 @@ int main(int argc, char *argv[]) {
     size_t output_blocks = N;
     if (MODE == 1 || MODE == 3) {
       output_blocks = SampleSize;
-    } else if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8) {
+    } else if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8 || MODE == 9) {
       output_blocks = SampleSize * K;
     }
     unsigned char *decrypted_result_buf_ptr = buf;
@@ -473,29 +523,42 @@ int main(int argc, char *argv[]) {
     phase_start = phase_end;
   }
 
-  // NOTE: The +1 and -1 are to remove the additional timing variance that stems from the
-  // first run of execution always taking longer to execute due to instruction page cache warming.
-  double ecallTime_average = calculateAve(ecallTime_array + 1, REPEAT - 1);
-  double ptime_average = calculateAve(ptime_array + 1, REPEAT - 1);
+  // Exclude the configured warm-up rounds from reported time averages.
+  double ecallTime_average = calculateAve(ecallTime_array + WARMUP, REPEAT);
+  double ptime_average = calculateAve(ptime_array + WARMUP, REPEAT);
 
   printf("%f\n", ecallTime_average);
   printf("%f\n", ptime_average);
 
-  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8) {
-    double gen_perm_time_average = calculateAve(gen_perm_time_array + 1, REPEAT - 1);
-    double apply_perm_time_average = calculateAve(apply_perm_time_array + 1, REPEAT - 1);
+  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8 || MODE == 9) {
+    double gen_perm_time_average = calculateAve(gen_perm_time_array + WARMUP, REPEAT);
+    double apply_perm_time_average = calculateAve(apply_perm_time_array + WARMUP, REPEAT);
     printf("%f\n", gen_perm_time_average);
     printf("%f\n", apply_perm_time_average);
   }
+  // Some legacy modes report a cumulative swap counter, so keep round zero.
   printf("%ld\n", num_oswaps[0]);
   if (profile_online && (MODE == 6 || MODE == 8)) {
-    const double route = calculateAve(online_route_array + 1, REPEAT - 1);
-    const double reorder = calculateAve(online_reorder_array + 1, REPEAT - 1);
-    const double copy = calculateAve(online_copy_array + 1, REPEAT - 1);
-    const double shuffle = calculateAve(online_shuffle_array + 1, REPEAT - 1);
-    const double online = calculateAve(apply_perm_time_array + 1, REPEAT - 1);
+    const double route = calculateAve(online_route_array + WARMUP, REPEAT);
+    const double reorder = calculateAve(online_reorder_array + WARMUP, REPEAT);
+    const double copy = calculateAve(online_copy_array + WARMUP, REPEAT);
+    const double shuffle = calculateAve(online_shuffle_array + WARMUP, REPEAT);
+    const double online = calculateAve(apply_perm_time_array + WARMUP, REPEAT);
     printf("PROFILE,%f,%f,%f,%f,%f\n", route, reorder, copy, shuffle,
            online - route - reorder - copy - shuffle);
+  }
+  if (profile_offline && (MODE == 6 || MODE == 8)) {
+    double phases[9] = {};
+    double measured = 0.0;
+    for (size_t phase = 0; phase < 9; ++phase) {
+      phases[phase] = calculateAve(offline_phase_array[phase] + WARMUP, REPEAT);
+      measured += phases[phase];
+    }
+    const double offline = calculateAve(gen_perm_time_array + WARMUP, REPEAT);
+    printf("OFFLINE_PROFILE,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%zu,%zu\n",
+           phases[0], phases[1], phases[2], phases[3], phases[4],
+           phases[5], phases[6], phases[7], phases[8], offline - measured,
+           offline_heap_peak_bytes, total_heap_peak_bytes);
   }
 
   close(randfd);

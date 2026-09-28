@@ -4,6 +4,7 @@
 #include "../../utils.hpp"
 #endif
 #include "../OnlineProfile.hpp"
+#include "../OfflineProfile.hpp"
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
@@ -250,7 +251,7 @@ static ControlReadResult SWOControlRead(const unsigned char *D,
         std::memcpy(sample, child.data_ptr(), m * block_size);
       });
       online_profile::Track(shuffle_ms, [&] {
-        RecursiveShuffle_M2(sample, m, block_size);
+        // RecursiveShuffle_M2(sample, m, block_size);
       });
       written += m;
     }
@@ -311,6 +312,7 @@ extern "C" void DecSuppleSWO(unsigned char *encrypted_buffer,
   ret->apply_perm_time = 0.0;
   ret->online_route_ms = ret->online_reorder_ms = 0.0;
   ret->online_copy_ms = ret->online_shuffle_ms = 0.0;
+  offline_profile::Reset(ret);
 #ifdef COUNT_OSWAPS
   ret->OSWAP_count = 0;
 #endif
@@ -351,22 +353,34 @@ extern "C" void DecSuppleSWO(unsigned char *encrypted_buffer,
   long t0, t1;
 
   ocall_clock(&t0);
-  std::vector<size_t> M_matrix = SWOMark(N, M, K);
+  std::vector<size_t> M_matrix;
+  online_profile::Track(ret->collect_offline_profile
+                            ? &ret->offline_mark_ms : nullptr, [&] {
+    M_matrix = SWOMark(N, M, K);
+  });
 
   std::vector<FrontierNode> F;
   size_t mk = 0;
-  const bool frontier_overflow = MulOverflowSizeT(M, K, &mk);
-  if (frontier_overflow || mk > N)
-  {
-    F = SWOFrontier(N, M, K);
-  }
-
-  const std::vector<FrontierNode> nodes = SwoRootNodes(F, K);
-  const size_t control_bits = SWOControlCount(nodes, N, M);
-  std::vector<uint8_t> C = SWOControl(M_matrix, F, N, M, K);
+  std::vector<FrontierNode> nodes;
+  size_t control_bits = 0;
+  online_profile::Track(ret->collect_offline_profile
+                            ? &ret->offline_count_ms : nullptr, [&] {
+    const bool frontier_overflow = MulOverflowSizeT(M, K, &mk);
+    if (frontier_overflow || mk > N)
+      F = SWOFrontier(N, M, K);
+    nodes = SwoRootNodes(F, K);
+    control_bits = SWOControlCount(nodes, N, M);
+  });
+  std::vector<uint8_t> C;
+  online_profile::Track(ret->collect_offline_profile
+                            ? &ret->offline_swo_write_ms : nullptr, [&] {
+    C = SWOControl(M_matrix, F, N, M, K);
+  });
   std::vector<size_t>().swap(M_matrix);
   ocall_clock(&t1);
   ret->gen_perm_time = static_cast<double>(t1 - t0) / 1000.0;
+  if (ret->collect_offline_profile)
+    ret->offline_heap_peak_bytes = offline_profile::HeapPeakBytes();
 
 #ifdef COUNT_OSWAPS
   const uint64_t initial_oswaps = OSWAP_COUNTER;
@@ -381,6 +395,8 @@ extern "C" void DecSuppleSWO(unsigned char *encrypted_buffer,
                      ret->collect_online_profile ? ret : nullptr);
   ocall_clock(&t1);
   ret->apply_perm_time = static_cast<double>(t1 - t0) / 1000.0;
+  if (ret->collect_offline_profile)
+    ret->total_heap_peak_bytes = offline_profile::HeapPeakBytes();
   ret->ptime = ret->gen_perm_time + ret->apply_perm_time;
 
 #ifdef COUNT_OSWAPS

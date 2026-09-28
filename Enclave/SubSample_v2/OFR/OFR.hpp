@@ -123,6 +123,11 @@ std::vector<uint8_t> OFRPostOrderControls(
     size_t n_left,
     size_t n_right);
 
+// Convert one contiguous DFS control span without copying its source first.
+std::vector<uint8_t> OFRPostOrderControls(
+    const uint8_t *controls, size_t control_count,
+    size_t n, size_t n_left, size_t n_right);
+
 // Apply controls in place. The first n_left records are the left output;
 // the remaining n_right records are the right output.
 void OFRApplyInPlace(unsigned char *data,
@@ -159,6 +164,10 @@ void OFRApplyPreparedInPlace(
     size_t n_right,
     size_t block_size);
 
+void OFRApplyPreparedInPlace(
+    unsigned char *data, const uint8_t *controls, size_t control_count,
+    size_t n, size_t n_left, size_t n_right, size_t block_size);
+
 void OFRApplyPreparedLevelOrderedInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &level_controls,
@@ -174,6 +183,17 @@ void OFRApplyPreparedPostOrderInPlace(
     size_t n_left,
     size_t n_right,
     size_t block_size);
+
+void OFRApplyPreparedPostOrderInPlace(
+    unsigned char *data, const uint8_t *postorder_controls,
+    size_t control_count, size_t n, size_t n_left, size_t n_right,
+    size_t block_size);
+
+// Replay a DFS control span on machine-word membership rows in place.
+void OFRApplyWordsInPlace(
+    size_t *rows, size_t words_per_row,
+    const std::vector<uint8_t> &controls, size_t position,
+    size_t n, size_t n_left, size_t n_right);
 
 OFRControlReadResult OFRControlRead(const unsigned char *data,
                                     const std::vector<uint8_t> &controls,

@@ -24,7 +24,15 @@ columns `route_ms`, `reorder_ms`, `copy_ms`, `shuffle_ms`, and `other_ms` sum to
 `apply_ms`. Routing includes control unpacking and Compact for Supple, and
 the prepared OFR network for OFRSupple. Copy includes reusable workspace
 growth and record copies. `reorder_ms` remains in the CSV schema and is zero
-because OFR now returns contiguous left and right views directly. Both
-modes include the same leaf Shuffle. `other_ms` includes profiling overhead
-and recursive bookkeeping. Without `--profile`, the application retains its
+because OFR now returns contiguous left and right views directly.
+`other_ms` includes profiling overhead and recursive bookkeeping. Both modes
+currently skip leaf Shuffle. Without `--profile`, the application retains its
 original five-line output.
+
+Add `--offline-profile` to record offline mark, count, SWO write, OFR tag,
+normalize, control write, membership replay, projection, preparation, and
+unattributed timings. It also reports the SGX runtime's process-lifetime heap
+growth high-water mark after the first round's offline stage and the maximum
+after online across all rounds, in bytes. These are not live allocation or EPC
+measurements.
+Both profiling flags can be used together.

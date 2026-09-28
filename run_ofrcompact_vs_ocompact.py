@@ -12,7 +12,7 @@ T = TypeVar("T")
 # Edit these defaults for no-argument runs; command-line options override them.
 DEFAULT_BINARY = "Application/ofrcompact_vs_ocompact"
 DEFAULT_N = [1048576]#[1048576, 2097152, 4194304, 8388608, 16777216]
-DEFAULT_BLOCK_SIZES = [128]#[4,8,12,16,24,32,64,128,256,512,1024]
+DEFAULT_BLOCK_SIZES = [4,8,12,16,24,32,64,128,256,512,1024,4096]#[4,8,12,16,24,32,64,128,256,512,1024]
 DEFAULT_FORK_RATIOS = [0.25]
 DEFAULT_REPEAT = 15
 DEFAULT_WARMUP = 5

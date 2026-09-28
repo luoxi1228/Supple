@@ -284,6 +284,39 @@ static void BalancedPostOrder()
   }
 }
 
+static void CheckWordReplay()
+{
+  for (size_t n : {size_t(2), size_t(5), size_t(16), size_t(33), size_t(65)})
+    for (size_t words : {size_t(1), size_t(2), size_t(3)})
+    {
+      const size_t left = n / 2;
+      std::vector<uint8_t> tags(n, OFR_TAG_RIGHT);
+      for (size_t i = 0; i < left; ++i) tags[(i * 7) % n] = OFR_TAG_LEFT;
+      // For lengths sharing factors with seven, use a permutation instead.
+      if (n % 7 == 0)
+      {
+        std::fill(tags.begin(), tags.end(), OFR_TAG_RIGHT);
+        for (size_t i = 0; i < left; ++i) tags[i] = OFR_TAG_LEFT;
+      }
+      const std::vector<uint8_t> tape = OFRControl(tags, n, left, n - left);
+      std::vector<uint8_t> shared(3 + tape.size() + 2, 0xff);
+      std::copy(tape.begin(), tape.end(), shared.begin() + 3);
+      std::vector<size_t> routed(n * words);
+      for (size_t i = 0; i < routed.size(); ++i)
+        routed[i] = i * size_t(0x9e3779b9U) ^ (i + 17);
+      const std::vector<size_t> original = routed;
+      OFRApplyWordsInPlace(routed.data(), words, shared, 3, n, left, n - left);
+      const OFRControlReadResult expected = OFRControlRead(
+          reinterpret_cast<const unsigned char *>(original.data()), shared,
+          n, left, n - left, words * sizeof(size_t), 3);
+      assert(expected.next_pos == 3 + tape.size());
+      assert(std::memcmp(routed.data(), expected.left.data(),
+                         expected.left.size()) == 0);
+      assert(std::memcmp(routed.data() + left * words,
+                         expected.right.data(), expected.right.size()) == 0);
+    }
+}
+
 static size_t CheckEveryBalanceLayer(std::vector<uint8_t> &tags,
                                      std::vector<uint8_t> &controls,
                                      size_t base, size_t stride, size_t n,
@@ -511,6 +544,7 @@ int main()
   ExhaustiveNormalize();
   RandomLarge();
   BalancedPostOrder();
+  CheckWordReplay();
   CheckInPlaceViews();
   std::printf("PASS: %zu exact routings, %zu normalization/capacity cases, "
               "arbitrary lengths, offsets, one-sided outputs, and large inputs\n",
