@@ -48,12 +48,6 @@ struct OFRControlReadResult
   size_t next_pos;
 };
 
-struct OFROutputSwap
-{
-  size_t first;
-  size_t second;
-};
-
 std::array<uint8_t, 10> OFRPairMask(uint8_t x, uint8_t y);
 
 uint8_t OForkControl(uint8_t x,
@@ -66,13 +60,21 @@ std::vector<uint8_t> OFRNormalize(const std::vector<uint8_t> &tags,
                                   size_t n_left,
                                   size_t n_right);
 
+// Convenience wrapper that preserves tags and materializes both child arrays.
 OFRBalanceResult OFRBalance(const std::vector<uint8_t> &tags,
                             size_t n,
                             size_t n_left,
                             size_t n_right);
 
+// Mutate one strided tag view and write its layer controls at position.
+size_t OFRBalanceInPlace(std::vector<uint8_t> &tags,
+                         std::vector<uint8_t> &controls,
+                         size_t base, size_t stride, size_t n,
+                         size_t n_left, size_t n_right, size_t position);
+
 size_t OFRControlCount(size_t n, size_t n_left, size_t n_right);
 
+// Compatibility wrapper: copies tags before generating controls.
 size_t OFRControlWrite(const std::vector<uint8_t> &tags,
                        std::vector<uint8_t> &controls,
                        size_t n,
@@ -80,15 +82,29 @@ size_t OFRControlWrite(const std::vector<uint8_t> &tags,
                        size_t n_right,
                        size_t position);
 
+// Preferred path: the root view is validated once; recursive views use the
+// capacities established by Balance and do not allocate child tag arrays.
+size_t OFRControlWrite(std::vector<uint8_t> &tags,
+                       std::vector<uint8_t> &controls,
+                       size_t base, size_t stride, size_t n,
+                       size_t n_left, size_t n_right, size_t position);
+
+size_t OFRControlWrite(std::vector<uint8_t> &tags,
+                       std::vector<uint8_t> &controls,
+                       size_t n, size_t n_left, size_t n_right,
+                       size_t position);
+
 std::vector<uint8_t> OFRControl(const std::vector<uint8_t> &tags,
                                 size_t n,
                                 size_t n_left,
                                 size_t n_right);
 
-// The output order is public: prepare this swap plan before online execution.
-std::vector<OFROutputSwap> OFROutputSwaps(size_t n,
-                                           size_t n_left,
-                                           size_t n_right);
+// Generate the prepared contiguous-block postorder tape for a balanced
+// power-of-two network, selecting the faster public-size-dependent layout.
+std::vector<uint8_t> OFRControlPostOrder(const std::vector<uint8_t> &tags,
+                                         size_t n,
+                                         size_t n_left,
+                                         size_t n_right);
 
 // Reorder a balanced power-of-two control tape for the original level-order
 // OFork network. This conversion depends only on public dimensions.
@@ -107,76 +123,57 @@ std::vector<uint8_t> OFRPostOrderControls(
     size_t n_left,
     size_t n_right);
 
-// Apply prepared controls directly to a writable n-record buffer. This path
-// performs no dynamic allocations and preserves OFRControlRead's output order.
+// Apply controls in place. The first n_left records are the left output;
+// the remaining n_right records are the right output.
 void OFRApplyInPlace(unsigned char *data,
                      const std::vector<uint8_t> &controls,
-                     const std::vector<OFROutputSwap> &output_swaps,
                      size_t n,
                      size_t n_left,
                      size_t n_right,
-                     size_t block_size,
-                     bool apply_output_swaps = true);
+                     size_t block_size);
 
 void OFRApplyLevelOrderedInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &level_controls,
-    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
-    size_t block_size,
-    bool apply_output_swaps = true);
+    size_t block_size);
 
 // Apply a tape returned by OFRPostOrderControls. Balanced power-of-two only.
 void OFRApplyPostOrderInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &postorder_controls,
-    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
-    size_t block_size,
-    bool apply_output_swaps = true);
+    size_t block_size);
 
 // The following entry points skip the recursive control-count check. Call
 // them only with controls already validated during the offline prepare phase.
 void OFRApplyPreparedInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &controls,
-    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
-    size_t block_size,
-    bool apply_output_swaps = true);
+    size_t block_size);
 
 void OFRApplyPreparedLevelOrderedInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &level_controls,
-    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
-    size_t block_size,
-    bool apply_output_swaps = true);
+    size_t block_size);
 
 void OFRApplyPreparedPostOrderInPlace(
     unsigned char *data,
     const std::vector<uint8_t> &postorder_controls,
-    const std::vector<OFROutputSwap> &output_swaps,
     size_t n,
     size_t n_left,
     size_t n_right,
-    size_t block_size,
-    bool apply_output_swaps = true);
-
-// Complete the public output permutation after a network-only apply.
-void OFRApplyOutputSwapsInPlace(
-    unsigned char *data,
-    size_t n,
-    size_t block_size,
-    const std::vector<OFROutputSwap> &output_swaps);
+    size_t block_size);
 
 OFRControlReadResult OFRControlRead(const unsigned char *data,
                                     const std::vector<uint8_t> &controls,

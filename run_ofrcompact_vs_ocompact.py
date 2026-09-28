@@ -12,14 +12,14 @@ T = TypeVar("T")
 # Edit these defaults for no-argument runs; command-line options override them.
 DEFAULT_BINARY = "Application/ofrcompact_vs_ocompact"
 DEFAULT_N = [1048576]#[1048576, 2097152, 4194304, 8388608, 16777216]
-DEFAULT_BLOCK_SIZES = [4096]#[4,8,12,16,24,32,64,128,256,512,1024]
+DEFAULT_BLOCK_SIZES = [128]#[4,8,12,16,24,32,64,128,256,512,1024]
 DEFAULT_FORK_RATIOS = [0.25]
 DEFAULT_REPEAT = 15
 DEFAULT_WARMUP = 5
 DEFAULT_SEED = 20260903
 DEFAULT_OUTPUT = "RESULTS/ofrcompact_vs_ocompact.csv"
 
-# OFR timing fields exclude output reordering, which still runs afterward.
+# OFR online timing covers the complete in-place network execution.
 BINARY_FIELDS = [
     "n",
     "block_size",
@@ -261,7 +261,7 @@ def main() -> int:
                 print(
                     "  online mean: "
                     f"OFR {result['ofr_schedule']} "
-                    f"(no output reorder)={float(result['ofrcompact_ms']):.3f} ms, "
+                    f"={float(result['ofrcompact_ms']):.3f} ms, "
                     f"OCompact={float(result['ocompact_ms']):.3f} ms, "
                     f"speedup={float(result['speedup']):.3f}x"
                 )

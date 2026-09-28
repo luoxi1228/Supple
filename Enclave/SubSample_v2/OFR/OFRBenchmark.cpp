@@ -13,7 +13,6 @@ namespace
 {
 
 std::vector<uint8_t> g_ofr_controls;
-std::vector<ofr::OFROutputSwap> g_ofr_output_swaps;
 bool *g_ocompact_selected = NULL;
 size_t g_ofr_n = 0;
 size_t g_ofr_n_left = 0;
@@ -56,7 +55,6 @@ void ReleaseBenchmarkContext()
   g_ofr_n_right = 0;
   g_ofr_postordered = false;
   std::vector<uint8_t>().swap(g_ofr_controls);
-  std::vector<ofr::OFROutputSwap>().swap(g_ofr_output_swaps);
 }
 
 } // namespace
@@ -78,18 +76,11 @@ extern "C" int OFRCompactPrepare(uint8_t *routing_tags,
     long start_time = 0;
     long stop_time = 0;
     ocall_clock(&start_time);
-    std::vector<uint8_t> controls = ofr::OFRControl(
-        tags, n, n_left, n_right);
-    std::vector<ofr::OFROutputSwap> output_swaps =
-        ofr::OFROutputSwaps(n, n_left, n_right);
     const bool postordered = n >= 2 && (n & (n - 1)) == 0 &&
                              n_left == n / 2 && n_right == n / 2;
-    if (postordered)
-    {
-      std::vector<uint8_t> postorder_controls =
-          ofr::OFRPostOrderControls(controls, n, n_left, n_right);
-      controls.swap(postorder_controls);
-    }
+    std::vector<uint8_t> controls = postordered
+        ? ofr::OFRControlPostOrder(tags, n, n_left, n_right)
+        : ofr::OFRControl(tags, n, n_left, n_right);
     ocall_clock(&stop_time);
 
     const std::vector<uint8_t> normalized = ofr::OFRNormalize(
@@ -100,7 +91,6 @@ extern "C" int OFRCompactPrepare(uint8_t *routing_tags,
 
     ReleaseBenchmarkContext();
     g_ofr_controls.swap(controls);
-    g_ofr_output_swaps.swap(output_swaps);
     g_ocompact_selected = selected;
     g_ofr_n = n;
     g_ofr_n_left = n_left;
@@ -135,17 +125,13 @@ extern "C" double OFRCompactOnline(unsigned char *buffer,
     ocall_clock(&start_time);
     if (g_ofr_postordered)
       ofr::OFRApplyPreparedPostOrderInPlace(
-          buffer, g_ofr_controls, g_ofr_output_swaps,
-          n, g_ofr_n_left, g_ofr_n_right, block_size, false);
+          buffer, g_ofr_controls,
+          n, g_ofr_n_left, g_ofr_n_right, block_size);
     else
       ofr::OFRApplyPreparedInPlace(
-          buffer, g_ofr_controls, g_ofr_output_swaps,
-          n, g_ofr_n_left, g_ofr_n_right, block_size, false);
+          buffer, g_ofr_controls,
+          n, g_ofr_n_left, g_ofr_n_right, block_size);
     ocall_clock(&stop_time);
-
-    // Keep the final output identical, but exclude output swaps from the timer.
-    ofr::OFRApplyOutputSwapsInPlace(
-        buffer, n, block_size, g_ofr_output_swaps);
     return static_cast<double>(stop_time - start_time);
   }
   catch (...)

@@ -33,12 +33,12 @@ def available_cpu_count():
   return max(1, len(physical_cores))
 
 
-DEFAULT_MODE = [6, 8]
+DEFAULT_MODE = [2]
 DEFAULT_P = [0.015625]
-DEFAULT_N = [65536, 1048576]
-DEFAULT_K = [16, 64]
-DEFAULT_K_SELECT = 2   # 1 => k = 1/p, 2 => use --k list
-DEFAULT_BLOCK_SIZE = [16, 64]
+DEFAULT_N = [1048576]
+DEFAULT_K = [64]
+DEFAULT_K_SELECT = 1   # 1 => k = 1/p, 2 => use --k list
+DEFAULT_BLOCK_SIZE = [16]
 DEFAULT_REPEAT = 5
 DEFAULT_THREADS = 1 #available_cpu_count()
 

@@ -157,9 +157,18 @@ int main()
   const std::vector<FrontierNode> frontier = SWOFrontier(8, 2, 8);
   assert(frontier.size() == 2 && frontier[0].count == 4 && frontier[1].start == 4);
   assert(SWOControlCount(frontier, 8, 2) == 64);
+  // Use the fewest nodes and place the larger groups first.
+  const auto uneven = SWOFrontier(8, 2, 7);
+  assert(uneven.size() == 2 && uneven[0].start == 0 && uneven[0].count == 4 &&
+         uneven[1].start == 4 && uneven[1].count == 3);
+  const auto nonbinary = SWOFrontier(10, 3, 8);
+  assert(nonbinary.size() == 3 && nonbinary[0].count == 3 &&
+         nonbinary[1].start == 3 && nonbinary[1].count == 3 &&
+         nonbinary[2].start == 6 && nonbinary[2].count == 2);
   assert(SWOControlCount(SWOFrontier(8, 8, 4), 8, 8) == 0);
   const auto overflow_frontier = SWOFrontier(SIZE_MAX, SIZE_MAX / 2 + 1, 3);
-  assert(overflow_frontier.size() == 3);
+  assert(overflow_frontier.size() == 3 && overflow_frontier[2].start == 2 &&
+         overflow_frontier[2].count == 1);
 
   // Exhaust all small independent sample tuples, including complete overlap.
   for (size_t n = 2; n <= 5; ++n)
@@ -194,6 +203,7 @@ int main()
       }
   for (size_t k : {size_t(3), size_t(8), size_t(129)})
     verify(8, 2, Samples(k, {1, 6}), 24);
+  verify(10, 3, Samples(8, {1, 6, 8}), 24);
 
   // SWOMark and both production sampling entry points, including the ECALL.
   for (size_t k : {size_t(1), size_t(3), size_t(8), size_t(65)})

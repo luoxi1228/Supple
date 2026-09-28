@@ -95,22 +95,22 @@ std::vector<FrontierNode> SWOFrontier(size_t n, size_t m, size_t k)
 {
   if (k == 0)
     return {};
-  std::vector<FrontierNode> F{{0, k}};
-  for (size_t v = 0; v < F.size();)
+  if (m == 0 || m > n)
+    throw std::invalid_argument("Invalid SWO frontier dimensions");
+
+  const size_t max_samples_per_node = n / m;
+  const size_t node_count = k / max_samples_per_node +
+                            (k % max_samples_per_node != 0);
+  const size_t base_count = k / node_count;
+  const size_t larger_nodes = k % node_count;
+  std::vector<FrontierNode> F;
+  F.reserve(node_count);
+  size_t start = 0;
+  for (size_t v = 0; v < node_count; ++v)
   {
-    const FrontierNode node = F[v];
-    size_t capacity = 0;
-    const bool overflow = MulOverflowSizeT(m, node.count, &capacity);
-    if (node.count == 1 || (!overflow && capacity <= n))
-    {
-      ++v;
-    }
-    else
-    {
-      const size_t left = node.count / 2;
-      F[v] = {node.start, left};
-      F.insert(F.begin() + v + 1, {node.start + left, node.count - left});
-    }
+    const size_t count = base_count + (v < larger_nodes);
+    F.push_back({start, count});
+    start += count;
   }
   return F;
 }

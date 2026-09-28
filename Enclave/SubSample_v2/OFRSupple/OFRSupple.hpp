@@ -32,7 +32,6 @@ struct OFRSuppleControls
     size_t n;
     size_t n_left;
     size_t n_right;
-    std::vector<ofr::OFROutputSwap> output_swaps;
   };
   struct Node
   {
@@ -41,8 +40,7 @@ struct OFRSuppleControls
     bool postordered;
     std::vector<uint8_t> tape;
   };
-  // Prepared in preorder after the raw tape is written. The public output
-  // permutation is shared by nodes with the same dimensions.
+  // Prepared in preorder after the raw tape is written.
   std::vector<Shape> shapes;
   std::vector<Node> nodes;
 };

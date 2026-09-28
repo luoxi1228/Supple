@@ -110,26 +110,16 @@ static void Verify(const std::vector<uint8_t> &tags,
   if (check_compact)
   {
     std::vector<unsigned char> in_place = data;
-    const std::vector<OFROutputSwap> output_swaps =
-        OFROutputSwaps(n, n_left, n_right);
-    OFRApplyInPlace(in_place.data(), controls, output_swaps,
+    OFRApplyInPlace(in_place.data(), controls,
                     n, n_left, n_right, width);
     assert(std::equal(applied.left.begin(), applied.left.end(),
                       in_place.begin()));
     assert(std::equal(applied.right.begin(), applied.right.end(),
                       in_place.begin() + applied.left.size()));
 
-    std::vector<unsigned char> split_timing = data;
-    OFRApplyInPlace(split_timing.data(), controls, output_swaps,
-                    n, n_left, n_right, width, false);
-    OFRApplyOutputSwapsInPlace(
-        split_timing.data(), n, width, output_swaps);
-    assert(split_timing == in_place);
-
     std::vector<unsigned char> prepared = data;
-    OFRApplyPreparedInPlace(prepared.data(), controls, output_swaps,
-                            n, n_left, n_right, width, false);
-    OFRApplyOutputSwapsInPlace(prepared.data(), n, width, output_swaps);
+    OFRApplyPreparedInPlace(prepared.data(), controls,
+                            n, n_left, n_right, width);
     assert(prepared == in_place);
 
     if (n >= 2 && (n & (n - 1)) == 0 && n_left == n / 2)
@@ -138,39 +128,30 @@ static void Verify(const std::vector<uint8_t> &tags,
       const std::vector<uint8_t> level_controls =
           OFRLevelOrderControls(controls, n, n_left, n_right);
       OFRApplyLevelOrderedInPlace(level_ordered.data(), level_controls,
-                                  output_swaps, n, n_left, n_right, width);
+                                  n, n_left, n_right, width);
       assert(level_ordered == in_place);
-
-      std::vector<unsigned char> level_split_timing = data;
-      OFRApplyLevelOrderedInPlace(level_split_timing.data(), level_controls,
-                                  output_swaps, n, n_left, n_right, width,
-                                  false);
-      OFRApplyOutputSwapsInPlace(
-          level_split_timing.data(), n, width, output_swaps);
-      assert(level_split_timing == level_ordered);
 
       std::vector<unsigned char> prepared_level = data;
       OFRApplyPreparedLevelOrderedInPlace(
-          prepared_level.data(), level_controls, output_swaps,
-          n, n_left, n_right, width, false);
-      OFRApplyOutputSwapsInPlace(
-          prepared_level.data(), n, width, output_swaps);
+          prepared_level.data(), level_controls,
+          n, n_left, n_right, width);
       assert(prepared_level == level_ordered);
 
       const std::vector<uint8_t> postorder_controls =
           OFRPostOrderControls(controls, n, n_left, n_right);
       assert(postorder_controls.size() == controls.size());
+      const std::vector<uint8_t> direct_postorder =
+          OFRControlPostOrder(tags, n, n_left, n_right);
+      assert(direct_postorder == postorder_controls);
       std::vector<unsigned char> postordered = data;
       OFRApplyPostOrderInPlace(postordered.data(), postorder_controls,
-                               output_swaps, n, n_left, n_right, width);
+                               n, n_left, n_right, width);
       assert(postordered == in_place);
 
       std::vector<unsigned char> prepared_postorder = data;
       OFRApplyPreparedPostOrderInPlace(
-          prepared_postorder.data(), postorder_controls, output_swaps,
-          n, n_left, n_right, width, false);
-      OFRApplyOutputSwapsInPlace(
-          prepared_postorder.data(), n, width, output_swaps);
+          prepared_postorder.data(), postorder_controls,
+          n, n_left, n_right, width);
       assert(prepared_postorder == in_place);
     }
 
@@ -303,6 +284,134 @@ static void BalancedPostOrder()
   }
 }
 
+static size_t CheckEveryBalanceLayer(std::vector<uint8_t> &tags,
+                                     std::vector<uint8_t> &controls,
+                                     size_t base, size_t stride, size_t n,
+                                     size_t n_left, size_t n_right,
+                                     size_t position)
+{
+  if (n_left == 0 || n_right == 0)
+    return position;
+  if (n == 2)
+    return OFRControlWrite(tags, controls, base, stride, n,
+                           n_left, n_right, position);
+
+  position = OFRBalanceInPlace(tags, controls, base, stride, n,
+                               n_left, n_right, position);
+  const size_t top_n = n / 2 + n % 2;
+  const size_t top_left = n_left / 2 + n_left % 2;
+  const size_t top_right = top_n - top_left;
+  size_t actual_top_left = 0, actual_top_right = 0;
+  size_t actual_bottom_left = 0, actual_bottom_right = 0;
+  for (size_t i = 0; i < n; ++i)
+  {
+    const uint8_t tag = tags[base + i * stride];
+    if (i % 2 == 0)
+    {
+      actual_top_left += (tag >> 1U) & 1U;
+      actual_top_right += tag & 1U;
+    }
+    else
+    {
+      actual_bottom_left += (tag >> 1U) & 1U;
+      actual_bottom_right += tag & 1U;
+    }
+  }
+  assert(actual_top_left == top_left && actual_top_right == top_right);
+  assert(actual_bottom_left == n_left - top_left);
+  assert(actual_bottom_right == n_right - top_right);
+  position = CheckEveryBalanceLayer(tags, controls, base, stride * 2,
+                                     top_n, top_left, top_right, position);
+  return CheckEveryBalanceLayer(tags, controls, base + stride, stride * 2,
+                                 n / 2, n_left - top_left,
+                                 n_right - top_right, position);
+}
+
+static void CheckInPlaceViews()
+{
+  std::mt19937 random(20260928);
+  for (size_t n = 3; n <= 33; ++n)
+    for (size_t n_left = 1; n_left < n; ++n_left)
+      for (size_t trial = 0; trial < 4; ++trial)
+      {
+        const size_t n_right = n - n_left;
+        std::vector<size_t> order(n);
+        for (size_t i = 0; i < n; ++i) order[i] = i;
+        std::vector<uint8_t> tags(n, OFR_TAG_ZERO);
+        std::shuffle(order.begin(), order.end(), random);
+        for (size_t i = 0; i < n_left; ++i)
+          tags[order[i]] |= OFR_TAG_LEFT;
+        std::shuffle(order.begin(), order.end(), random);
+        for (size_t i = 0; i < n_right; ++i)
+          tags[order[i]] |= OFR_TAG_RIGHT;
+
+        const size_t base = 2, stride = 3, offset = 5;
+        std::vector<uint8_t> view(base + n * stride + 2, 0xa5);
+        for (size_t i = 0; i < n; ++i) view[base + i * stride] = tags[i];
+        const std::vector<uint8_t> original = view;
+        const std::vector<uint8_t> expected =
+            OFRControl(tags, n, n_left, n_right);
+        std::vector<uint8_t> controls(offset + expected.size() + 3, 0xa5);
+        const size_t end = OFRControlWrite(
+            view, controls, base, stride, n, n_left, n_right, offset);
+        assert(end == offset + expected.size());
+        assert(std::equal(expected.begin(), expected.end(),
+                          controls.begin() + offset));
+        for (size_t i = 0; i < view.size(); ++i)
+          if (i < base || (i - base) % stride != 0 ||
+              (i - base) / stride >= n)
+            assert(view[i] == original[i]);
+        for (size_t i = 0; i < controls.size(); ++i)
+          if (i < offset || i >= end) assert(controls[i] == 0xa5);
+
+        view = original;
+        std::vector<uint8_t> layer(offset + n / 2 + 3, 0xa5);
+        const size_t layer_end = OFRBalanceInPlace(
+            view, layer, base, stride, n, n_left, n_right, offset);
+        assert(layer_end == offset + n / 2);
+        const OFRBalanceResult legacy = OFRBalance(tags, n, n_left, n_right);
+        assert(std::equal(legacy.controls.begin(), legacy.controls.end(),
+                          layer.begin() + offset));
+        size_t top_left = 0, top_right = 0, bottom_left = 0, bottom_right = 0;
+        for (size_t i = 0; i < n; ++i)
+        {
+          const uint8_t tag = view[base + i * stride];
+          if (i % 2 == 0)
+          {
+            assert(tag == legacy.top_tags[i / 2]);
+            top_left += (tag >> 1U) & 1U;
+            top_right += tag & 1U;
+          }
+          else
+          {
+            assert(tag == legacy.bottom_tags[i / 2]);
+            bottom_left += (tag >> 1U) & 1U;
+            bottom_right += tag & 1U;
+          }
+        }
+        assert(top_left == (n_left + 1) / 2);
+        assert(top_right == (n + 1) / 2 - top_left);
+        assert(bottom_left == n_left - top_left);
+        assert(bottom_right == n_right - top_right);
+        for (size_t gate = 0; gate < n / 2; ++gate)
+        {
+          const uint8_t x = tags[2 * gate];
+          const uint8_t y = tags[2 * gate + 1];
+          const uint8_t top = view[base + 2 * gate * stride];
+          const uint8_t bottom = view[base + (2 * gate + 1) * stride];
+          assert(layer[offset + gate] == OForkControl(x, y, top, bottom));
+        }
+
+        view = original;
+        std::fill(controls.begin(), controls.end(), 0xa5);
+        const size_t checked_end = CheckEveryBalanceLayer(
+            view, controls, base, stride, n, n_left, n_right, offset);
+        assert(checked_end == end);
+        assert(std::equal(expected.begin(), expected.end(),
+                          controls.begin() + offset));
+      }
+}
+
 static void CheckHelpersAndErrors()
 {
   size_t pair_index = 0;
@@ -366,13 +475,12 @@ static void CheckPublishedExamples()
         Records(n, 4).data(), tags, n, 6, 6, 4);
     const std::vector<uint32_t> expected_left = {0, 4, 2, 9, 1, 3};
     const std::vector<uint32_t> expected_right = {0, 8, 6, 5, 10, 7};
-    std::vector<uint32_t> left(output.left.size() / 4);
-    std::vector<uint32_t> right(output.right.size() / 4);
-    for (size_t i = 0; i < left.size(); ++i)
-      std::memcpy(&left[i], output.left.data() + 4 * i, 4);
-    for (size_t i = 0; i < right.size(); ++i)
-      std::memcpy(&right[i], output.right.data() + 4 * i, 4);
-    assert(left == expected_left && right == expected_right);
+    std::vector<uint32_t> sorted_left = expected_left;
+    std::vector<uint32_t> sorted_right = expected_right;
+    std::sort(sorted_left.begin(), sorted_left.end());
+    std::sort(sorted_right.begin(), sorted_right.end());
+    assert(Ids(output.left, 4) == sorted_left);
+    assert(Ids(output.right, 4) == sorted_right);
   }
   {
     // A-I; left is ACI, right is ADE U FHI.
@@ -386,13 +494,12 @@ static void CheckPublishedExamples()
         Records(n, 4).data(), tags, n, 3, 6, 4);
     const std::vector<uint32_t> expected_left = {8, 0, 2};
     const std::vector<uint32_t> expected_right = {8, 3, 4, 5, 0, 7};
-    std::vector<uint32_t> left(output.left.size() / 4);
-    std::vector<uint32_t> right(output.right.size() / 4);
-    for (size_t i = 0; i < left.size(); ++i)
-      std::memcpy(&left[i], output.left.data() + 4 * i, 4);
-    for (size_t i = 0; i < right.size(); ++i)
-      std::memcpy(&right[i], output.right.data() + 4 * i, 4);
-    assert(left == expected_left && right == expected_right);
+    std::vector<uint32_t> sorted_left = expected_left;
+    std::vector<uint32_t> sorted_right = expected_right;
+    std::sort(sorted_left.begin(), sorted_left.end());
+    std::sort(sorted_right.begin(), sorted_right.end());
+    assert(Ids(output.left, 4) == sorted_left);
+    assert(Ids(output.right, 4) == sorted_right);
   }
 }
 
@@ -404,6 +511,7 @@ int main()
   ExhaustiveNormalize();
   RandomLarge();
   BalancedPostOrder();
+  CheckInPlaceViews();
   std::printf("PASS: %zu exact routings, %zu normalization/capacity cases, "
               "arbitrary lengths, offsets, one-sided outputs, and large inputs\n",
               exact_cases,

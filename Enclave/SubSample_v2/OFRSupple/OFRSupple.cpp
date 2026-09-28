@@ -143,7 +143,7 @@ OFRSuppleControlPositions WriteNode(
           (HasMembership(row, words, 0, left_k) << 1U) |
           HasMembership(row, words, left_k, right_k));
     }
-    const std::vector<uint8_t> normalized =
+    std::vector<uint8_t> normalized =
         ofr::OFRNormalize(tags, n, left_n, right_n);
     const size_t start = position.ofr_words;
     position.ofr_words = ofr::OFRControlWrite(
@@ -228,8 +228,7 @@ void PrepareNode(OFRSuppleControls &controls,
         break;
     }
     if (shape_index == controls.shapes.size())
-      controls.shapes.push_back({n, left_n, right_n,
-          ofr::OFROutputSwaps(n, left_n, right_n)});
+      controls.shapes.push_back({n, left_n, right_n});
 
     const bool postordered = n >= 2 && (n & (n - 1)) == 0 &&
                              left_n == n / 2 && right_n == n / 2;
@@ -261,7 +260,6 @@ OFRSuppleReadResult ReadNode(
 {
   double *copy_ms = profile ? &profile->online_copy_ms : nullptr;
   double *route_ms = profile ? &profile->online_route_ms : nullptr;
-  double *reorder_ms = profile ? &profile->online_reorder_ms : nullptr;
   double *shuffle_ms = profile ? &profile->online_shuffle_ms : nullptr;
   if (k == 1 && n == m)
   {
@@ -317,16 +315,10 @@ OFRSuppleReadResult ReadNode(
     online_profile::Track(route_ms, [&] {
       if (plan.postordered)
         ofr::OFRApplyPreparedPostOrderInPlace(
-            work.data_ptr(), plan.tape, shape.output_swaps,
-            n, left_n, right_n, block_size, false);
+            work.data_ptr(), plan.tape, n, left_n, right_n, block_size);
       else
         ofr::OFRApplyPreparedInPlace(
-            work.data_ptr(), plan.tape, shape.output_swaps,
-            n, left_n, right_n, block_size, false);
-    });
-    online_profile::Track(reorder_ms, [&] {
-      ofr::OFRApplyOutputSwapsInPlace(
-          work.data_ptr(), n, block_size, shape.output_swaps);
+            work.data_ptr(), plan.tape, n, left_n, right_n, block_size);
     });
     position.ofr_words += plan.tape.size();
     const OFRSuppleReadResult left = ReadNode(

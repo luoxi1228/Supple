@@ -23,7 +23,8 @@ to `benchmark_sgx_sim.py` to write the online breakdown for both modes. The
 columns `route_ms`, `reorder_ms`, `copy_ms`, `shuffle_ms`, and `other_ms` sum to
 `apply_ms`. Routing includes control unpacking and Compact for Supple, and
 the prepared OFR network for OFRSupple. Copy includes reusable workspace
-growth and record copies. Reorder is the public OFR output permutation; both
+growth and record copies. `reorder_ms` remains in the CSV schema and is zero
+because OFR now returns contiguous left and right views directly. Both
 modes include the same leaf Shuffle. `other_ms` includes profiling overhead
 and recursive bookkeeping. Without `--profile`, the application retains its
 original five-line output.

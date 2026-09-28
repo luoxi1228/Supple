@@ -62,9 +62,7 @@ static void CheckLevelOrdered(size_t width)
       tags, n, n / 2, n / 2);
   const std::vector<uint8_t> level_controls = OFRLevelOrderControls(
       controls, n, n / 2, n / 2);
-  const std::vector<OFROutputSwap> output_swaps = OFROutputSwaps(
-      n, n / 2, n / 2);
-  OFRApplyLevelOrderedInPlace(data.data(), level_controls, output_swaps,
+  OFRApplyLevelOrderedInPlace(data.data(), level_controls,
                               n, n / 2, n / 2, width);
   assert(std::memcmp(data.data(), expected.left.data(),
                      expected.left.size()) == 0);
@@ -80,7 +78,7 @@ static void CheckLevelOrdered(size_t width)
   const std::vector<uint8_t> postorder_controls = OFRPostOrderControls(
       controls, n, n / 2, n / 2);
   OFRApplyPreparedPostOrderInPlace(
-      postordered.data(), postorder_controls, output_swaps,
+      postordered.data(), postorder_controls,
       n, n / 2, n / 2, width);
   assert(postordered == data);
 }
