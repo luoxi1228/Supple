@@ -1,0 +1,80 @@
+Enclave/SubSample_v2/OFR/OFR.cpp:1733:6:void ofr::{anonymous}::ValidateTagView(const std::__1::vector<unsigned char>&, size_t, size_t, size_t, size_t, size_t)	96	static
+Enclave/SubSample_v2/OFR/OFR.cpp:56:8:size_t ofr::{anonymous}::OFRControlCountImpl(size_t, size_t, size_t)	64	static
+Enclave/SubSample_v2/OFR/OFR.cpp:1733:6:void ofr::{anonymous}::ValidateTagView(const std::__1::vector<unsigned char>&, size_t, size_t, size_t, size_t, size_t)	80	static
+Enclave/SubSample_v2/OFR/OFR.cpp:304:6:void ofr::{anonymous}::ApplyContiguousGateRun(unsigned char*, unsigned char*, size_t, size_t, ofr::PackedControlCursor&, const Gate&) [with Gate = StyledGate<OFORK_16>]	176	static
+Enclave/SubSample_v2/OFR/OFR.cpp:350:8:size_t ofr::{anonymous}::ApplyPostOrderGates(unsigned char*, ofr::PackedControlCursor&, size_t, size_t, size_t, const Gate&) [with Gate = StyledGate<OFORK_16>]	48	static
+Enclave/SubSample_v2/OFR/OFR.cpp:304:6:void ofr::{anonymous}::ApplyContiguousGateRun(unsigned char*, unsigned char*, size_t, size_t, ofr::PackedControlCursor&, const Gate&) [with Gate = GenericGate]	112	static
+Enclave/SubSample_v2/OFR/OFR.cpp:350:8:size_t ofr::{anonymous}::ApplyPostOrderGates(unsigned char*, ofr::PackedControlCursor&, size_t, size_t, size_t, const Gate&) [with Gate = GenericGate]	48	static
+Enclave/SubSample_v2/OFR/OFR.cpp:304:6:void ofr::{anonymous}::ApplyContiguousGateRun(unsigned char*, unsigned char*, size_t, size_t, ofr::PackedControlCursor&, const Gate&) [with Gate = StyledGate<OFORK_4>]	128	static
+Enclave/SubSample_v2/OFR/OFR.cpp:350:8:size_t ofr::{anonymous}::ApplyPostOrderGates(unsigned char*, ofr::PackedControlCursor&, size_t, size_t, size_t, const Gate&) [with Gate = StyledGate<OFORK_4>]	48	static
+Enclave/SubSample_v2/OFR/OFR.cpp:304:6:void ofr::{anonymous}::ApplyContiguousGateRun(unsigned char*, unsigned char*, size_t, size_t, ofr::PackedControlCursor&, const Gate&) [with Gate = StyledGate<OFORK_8>]	128	static
+Enclave/SubSample_v2/OFR/OFR.cpp:304:6:void ofr::{anonymous}::ApplyContiguousGateRun(unsigned char*, unsigned char*, size_t, size_t, ofr::PackedControlCursor&, const Gate&) [with Gate = StyledGate<OFORK_12>]	176	static
+Enclave/SubSample_v2/OFR/OFR.cpp:350:8:size_t ofr::{anonymous}::ApplyPostOrderGates(unsigned char*, ofr::PackedControlCursor&, size_t, size_t, size_t, const Gate&) [with Gate = StyledGate<OFORK_12>]	48	static
+Enclave/SubSample_v2/OFR/OFR.cpp:304:6:void ofr::{anonymous}::ApplyContiguousGateRun(unsigned char*, unsigned char*, size_t, size_t, ofr::PackedControlCursor&, const Gate&) [with Gate = StyledGate<OFORK_24>]	176	static
+Enclave/SubSample_v2/OFR/OFR.cpp:350:8:size_t ofr::{anonymous}::ApplyPostOrderGates(unsigned char*, ofr::PackedControlCursor&, size_t, size_t, size_t, const Gate&) [with Gate = StyledGate<OFORK_24>]	48	static
+Enclave/SubSample_v2/OFR/OFR.cpp:304:6:void ofr::{anonymous}::ApplyContiguousGateRun(unsigned char*, unsigned char*, size_t, size_t, ofr::PackedControlCursor&, const Gate&) [with Gate = StyledGate<OFORK_16X>]	208	static
+Enclave/SubSample_v2/OFR/OFR.cpp:222:8:size_t ofr::{anonymous}::WriteLevelOrderControls(const ofr::PackedControls&, ofr::PackedControls*, size_t, size_t, size_t, size_t, size_t, size_t)	112	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:304:6:void ofr::{anonymous}::ApplyContiguousGateRun(unsigned char*, unsigned char*, size_t, size_t, ofr::PackedControlCursor&, const Gate&) [with Gate = StyledGate<OFORK_8_16X>]	208	static
+Enclave/SubSample_v2/OFR/OFR.cpp:350:8:size_t ofr::{anonymous}::ApplyPostOrderGates(unsigned char*, ofr::PackedControlCursor&, size_t, size_t, size_t, const Gate&) [with Gate = StyledGate<OFORK_8_16X>]	48	static
+Enclave/SubSample_v2/OFR/OFR.cpp:271:8:size_t ofr::{anonymous}::WritePostOrderFromDfs(ofr::PackedControlView, const std::__1::vector<long unsigned int>&, ofr::PackedControls*, size_t, size_t, size_t)	128	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:1569:6:void ofr::{anonymous}::OFRControlPostOrderTiledImpl(uint8_t*, ofr::PackedControlMutableView, size_t*, size_t, size_t) [with bool RouteWords = false]	30320	static
+Enclave/SubSample_v2/OFR/OFR.cpp:1418:6:void ofr::{anonymous}::OFRPostOrderPrefixImpl(uint8_t*, ofr::PackedControlMutableView, size_t*, size_t, size_t, size_t, size_t) [with bool RouteWords = true]	384	static
+Enclave/SubSample_v2/OFR/OFR.cpp:1569:6:void ofr::{anonymous}::OFRControlPostOrderTiledImpl(uint8_t*, ofr::PackedControlMutableView, size_t*, size_t, size_t) [with bool RouteWords = true]	30656	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:576:8:size_t ofr::{anonymous}::OFRBalanceLayer(uint8_t*, ofr::PackedControls&, uint8_t*, const size_t*, size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t*, size_t) [with bool PostOrder = false; bool RouteWords = false]	128	static
+Enclave/SubSample_v2/OFR/OFR.cpp:576:8:size_t ofr::{anonymous}::OFRBalanceLayer(uint8_t*, ofr::PackedControls&, uint8_t*, const size_t*, size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t*, size_t) [with bool PostOrder = false; bool RouteWords = true]	224	static
+Enclave/SubSample_v2/OFR/OFR.cpp:250:8:size_t ofr::{anonymous}::BuildDfsControlStarts(size_t, size_t, size_t, size_t, std::__1::vector<long unsigned int>*)	256	static
+Enclave/SubSample_v2/OFR/OFR.cpp:177:8:size_t ofr::{anonymous}::OFRApplyWordsStrided(size_t*, size_t, ofr::PackedControlView, size_t, size_t, size_t, size_t, size_t)	240	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:177:8:size_t ofr::{anonymous}::OFRApplyWordsStrided(size_t*, size_t, ofr::PackedControlView, size_t, size_t, size_t, size_t, size_t)	192	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:127:8:size_t ofr::{anonymous}::OFRApplyStrided(unsigned char*, ofr::PackedControlView, size_t, size_t, size_t, size_t, size_t, size_t)	176	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:127:8:size_t ofr::{anonymous}::OFRApplyStrided(unsigned char*, ofr::PackedControlView, size_t, size_t, size_t, size_t, size_t, size_t)	160	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:127:8:size_t ofr::{anonymous}::OFRApplyStrided(unsigned char*, ofr::PackedControlView, size_t, size_t, size_t, size_t, size_t, size_t)	160	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:127:8:size_t ofr::{anonymous}::OFRApplyStrided(unsigned char*, ofr::PackedControlView, size_t, size_t, size_t, size_t, size_t, size_t)	144	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:350:8:size_t ofr::{anonymous}::ApplyPostOrderGates(unsigned char*, ofr::PackedControlCursor&, size_t, size_t, size_t, const Gate&) [with Gate = StyledGate<OFORK_16X>]	112	static
+Enclave/SubSample_v2/OFR/OFR.cpp:350:8:size_t ofr::{anonymous}::ApplyPostOrderGates(unsigned char*, ofr::PackedControlCursor&, size_t, size_t, size_t, const Gate&) [with Gate = StyledGate<OFORK_8>]	112	static
+Enclave/SubSample_v2/OFR/PackedControls.hpp:58:8:void ofr::PackedControlMutableView::set(size_t, uint8_t)	32	static
+Enclave/SubSample_v2/OFR/PackedControls.hpp:182:12:ofr::PackedControlCursor::PackedControlCursor(ofr::PackedControlView, size_t)	32	static
+Enclave/SubSample_v2/OFR/PackedControls.hpp:267:8:void ofr::PackedControls::set(size_t, uint8_t)	32	static
+Enclave/SubSample_v2/OFR/OFR.cpp:91:8:0(uint8_t*, ofr::PackedControls&, uint8_t*, size_t, size_t, size_t, size_t, size_t, size_t)	160	dynamic,bounded
+Enclave/SubSample_v2/OFR/PackedControls.hpp:269:13:ofr::PackedControls::Reference ofr::PackedControls::operator[](size_t)	32	static
+Enclave/SubSample_v2/OFR/OFR.cpp:713:8:size_t ofr::{anonymous}::OFRControlWriteAndRouteImpl(uint8_t*, ofr::PackedControls&, uint8_t*, size_t*, size_t, size_t, size_t, size_t, size_t, size_t, size_t)	160	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:713:8:size_t ofr::{anonymous}::OFRControlWriteAndRouteImpl(uint8_t*, ofr::PackedControls&, uint8_t*, size_t*, size_t, size_t, size_t, size_t, size_t, size_t, size_t)	144	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:713:8:size_t ofr::{anonymous}::OFRControlWriteAndRouteImpl(uint8_t*, ofr::PackedControls&, uint8_t*, size_t*, size_t, size_t, size_t, size_t, size_t, size_t, size_t)	144	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:713:8:size_t ofr::{anonymous}::OFRControlWriteAndRouteImpl(uint8_t*, ofr::PackedControls&, uint8_t*, size_t*, size_t, size_t, size_t, size_t, size_t, size_t, size_t)	144	dynamic,bounded
+Enclave/SubSample_v2/OFR/PackedControls.hpp:289:21:ofr::PackedControlView ofr::PackedControls::view(size_t) const	32	static
+Enclave/SubSample_v2/OFR/OFR.cpp:399:25:std::__1::array<unsigned char, 10> ofr::OFRPairMask(uint8_t, uint8_t)	96	static
+Enclave/SubSample_v2/OFR/OFR.cpp:424:9:uint8_t ofr::OForkControl(uint8_t, uint8_t, uint8_t, uint8_t)	32	static
+Enclave/SubSample_v2/OFR/OFR.cpp:485:6:void ofr::detail::OFRNormalizeOwnedInPlace(std::__1::vector<unsigned char>&, size_t, size_t, size_t, size_t, size_t)	96	static
+Enclave/SubSample_v2/OFR/OFR.cpp:461:6:void ofr::OFRNormalizeInPlace(std::__1::vector<unsigned char>&, size_t, size_t, size_t)	80	static
+Enclave/SubSample_v2/OFR/OFR.cpp:516:22:std::__1::vector<unsigned char> ofr::OFRNormalize(const std::__1::vector<unsigned char>&, size_t, size_t, size_t)	64	static
+Enclave/SubSample_v2/OFR/OFR.cpp:1775:8:size_t ofr::OFRBalanceInPlace(std::__1::vector<unsigned char>&, PackedControls&, size_t, size_t, size_t, size_t, size_t, size_t)	128	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:1791:8:size_t ofr::OFRControlCount(size_t, size_t, size_t)	32	static
+Enclave/SubSample_v2/OFR/OFR.cpp:1797:8:size_t ofr::OFRControlWrite(const std::__1::vector<unsigned char>&, PackedControls&, size_t, size_t, size_t, size_t)	160	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:1814:8:size_t ofr::OFRControlWrite(std::__1::vector<unsigned char>&, PackedControls&, size_t, size_t, size_t, size_t, size_t, size_t)	128	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:1828:8:size_t ofr::OFRControlWrite(std::__1::vector<unsigned char>&, PackedControls&, size_t, size_t, size_t, size_t)	128	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:1886:8:size_t ofr::detail::OFRControlWritePostOrderAndRouteNormalized(std::__1::vector<unsigned char>&, ofr::PackedControls&, size_t*, size_t, size_t, size_t, size_t, size_t, size_t)	160	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:1874:8:size_t ofr::OFRControlWritePostOrderAndRoute(std::__1::vector<unsigned char>&, PackedControls&, size_t*, size_t, size_t, size_t, size_t, size_t)	96	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:2019:6:void ofr::OFRApplyPreparedInPlace(unsigned char*, PackedControlView, size_t, size_t, size_t, size_t)	112	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:2008:6:void ofr::OFRApplyPreparedInPlace(unsigned char*, const PackedControls&, size_t, size_t, size_t, size_t)	80	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:1994:6:void ofr::OFRApplyInPlace(unsigned char*, const PackedControls&, size_t, size_t, size_t, size_t)	128	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:2063:6:void ofr::OFRApplyPreparedLevelOrderedInPlace(unsigned char*, const PackedControls&, size_t, size_t, size_t, size_t)	464	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:2047:6:void ofr::OFRApplyLevelOrderedInPlace(unsigned char*, const PackedControls&, size_t, size_t, size_t, size_t)	64	static
+Enclave/SubSample_v2/OFR/OFR.cpp:2140:6:void ofr::OFRApplyPreparedPostOrderInPlace(unsigned char*, PackedControlView, size_t, size_t, size_t, size_t)	128	static
+Enclave/SubSample_v2/OFR/OFR.cpp:2127:6:void ofr::OFRApplyPreparedPostOrderInPlace(unsigned char*, const PackedControls&, size_t, size_t, size_t, size_t)	80	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:2111:6:void ofr::OFRApplyPostOrderInPlace(unsigned char*, const PackedControls&, size_t, size_t, size_t, size_t)	128	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:2190:6:void ofr::OFRApplyWordsInPlace(size_t*, size_t, const PackedControls&, size_t, size_t, size_t, size_t)	288	dynamic,bounded
+/opt/intel/sgxsdk/include/libcxx/vector:1582:1:void std::__1::vector<_Tp, _Alloc>::reserve(size_type) [with _Tp = unsigned char; _Allocator = std::__1::allocator<unsigned char>]	48	static
+/opt/intel/sgxsdk/include/libcxx/vector:1438:1:typename std::__1::enable_if<(std::__1::__is_cpp17_forward_iterator<_InputIter>::value && std::__1::is_constructible<_Tp, typename std::__1::iterator_traits<_InputIterator>::reference>::value)>::type std::__1::vector<_Tp, _Alloc>::assign(_ForwardIterator, _ForwardIterator) [with _ForwardIterator = std::__1::__wrap_iter<unsigned char*>; _Tp = unsigned char; _Allocator = std::__1::allocator<unsigned char>]	64	static
+/opt/intel/sgxsdk/include/libcxx/vector:461:1:std::__1::__vector_base<_Tp, _Allocator>::~__vector_base() [with _Tp = unsigned char; _Allocator = std::__1::allocator<unsigned char>]	16	static
+Enclave/SubSample_v2/OFR/OFR.cpp:2212:22:ofr::OFRControlReadResult ofr::OFRControlRead(const unsigned char*, const PackedControls&, size_t, size_t, size_t, size_t, size_t)	208	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:2245:15:ofr::OFRDataResult ofr::OFRApply(const unsigned char*, const PackedControls&, size_t, size_t, size_t, size_t)	160	dynamic,bounded
+/opt/intel/sgxsdk/include/libcxx/vector:1105:1:void std::__1::vector<_Tp, _Alloc>::__append(size_type, const_reference) [with _Tp = unsigned char; _Allocator = std::__1::allocator<unsigned char>]	80	static
+Enclave/SubSample_v2/OFR/OFR.cpp:1756:18:ofr::OFRBalanceResult ofr::OFRBalance(const std::__1::vector<unsigned char>&, size_t, size_t, size_t)	176	static
+Enclave/SubSample_v2/OFR/OFR.cpp:1941:16:ofr::PackedControls ofr::OFRLevelOrderControls(const PackedControls&, size_t, size_t, size_t)	112	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:1907:16:ofr::PackedControls ofr::OFRControl(const std::__1::vector<unsigned char>&, size_t, size_t, size_t)	160	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:2265:15:ofr::OFRDataResult ofr::OFRCompact(const unsigned char*, const std::__1::vector<unsigned char>&, size_t, size_t, size_t, size_t)	208	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:1924:16:ofr::PackedControls ofr::OFRControlPostOrder(const std::__1::vector<unsigned char>&, size_t, size_t, size_t)	192	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:1972:16:ofr::PackedControls ofr::OFRPostOrderControls(PackedControlView, size_t, size_t, size_t)	192	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:1962:16:ofr::PackedControls ofr::OFRPostOrderControls(const PackedControls&, size_t, size_t, size_t)	80	dynamic,bounded
+/opt/intel/sgxsdk/include/libcxx/vector:1086:1:void std::__1::vector<_Tp, _Alloc>::__append(size_type) [with _Tp = unsigned char; _Allocator = std::__1::allocator<unsigned char>]	64	static
+Enclave/SubSample_v2/OFR/OFR.cpp:1849:8:size_t ofr::detail::OFRControlWriteAndRouteNormalized(std::__1::vector<unsigned char>&, ofr::PackedControls&, size_t*, size_t, size_t, size_t, size_t, size_t, size_t, std::__1::vector<unsigned char>*)	192	dynamic,bounded
+Enclave/SubSample_v2/OFR/OFR.cpp:1837:8:size_t ofr::OFRControlWriteAndRoute(std::__1::vector<unsigned char>&, PackedControls&, size_t*, size_t, size_t, size_t, size_t, size_t)	96	dynamic,bounded

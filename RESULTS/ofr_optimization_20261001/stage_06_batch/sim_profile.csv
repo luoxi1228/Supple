@@ -1,0 +1,3 @@
+case,n,m,k,width,method,round,memory_tracking,profile,offline_ms,online_ms,total_ms,ecall_ms,algorithm_heap_peak_bytes,mark_ms,count_ms,swo_write_ms,tags_ms,normalize_ms,write_ms,replay_ms,project_ms,prepare_ms
+custom,1048576,65536,16,8,Supple,0,0,1,321.560000,245.133000,566.693000,5317.306671,0,57.373000,0.002000,264.174000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000
+custom,1048576,65536,16,8,OFRSupple,0,0,1,258.538000,72.368000,330.906000,5095.808260,0,57.106000,0.003000,0.000000,4.493000,8.287000,183.842000,0.000000,3.892000,0.012000

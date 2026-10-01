@@ -77,6 +77,86 @@ uint8_t HasMembership(const size_t *row, size_t words,
   return static_cast<uint8_t>(any != 0);
 }
 
+#if defined(__SSE2__) && defined(__x86_64__) && !defined(__ILP32__)
+// The enclave uses -nostdinc, so express SSE2 through GNU vectors and compiler
+// builtins rather than depending on host intrinsic headers.
+typedef int TagVec32 __attribute__((vector_size(16)));
+typedef short TagVec16 __attribute__((vector_size(16)));
+typedef char TagVec8 __attribute__((vector_size(16)));
+typedef long long TagVec64 __attribute__((vector_size(16)));
+typedef unsigned long long TagUVec64 __attribute__((vector_size(16)));
+
+inline TagUVec64 OneWordTagPair(const size_t *rows,
+                               TagUVec64 left_mask, TagUVec64 right_mask,
+                               TagUVec64 &left_count, TagUVec64 &right_count)
+{
+  TagUVec64 data;
+  std::memcpy(&data, rows, sizeof(data));
+  const TagVec32 zero = {0, 0, 0, 0};
+  const TagUVec64 one = {1, 1};
+  const TagVec32 left_zero = (TagVec32)(data & left_mask) == zero;
+  const TagVec32 right_zero = (TagVec32)(data & right_mask) == zero;
+  // SSE2 compares 32-bit lanes. A whole 64-bit lane is zero exactly when
+  // both adjacent comparison lanes are true; this uses no secret branches.
+  const TagUVec64 left = (TagUVec64)~(
+      left_zero & __builtin_ia32_pshufd(left_zero, 0xb1)) & one;
+  const TagUVec64 right = (TagUVec64)~(
+      right_zero & __builtin_ia32_pshufd(right_zero, 0xb1)) & one;
+  left_count += left;
+  right_count += right;
+  return (left << 1) | right;
+}
+#endif
+
+void OneWordTags(const size_t *membership, uint8_t *tags, size_t n,
+                 size_t left_k, size_t right_k,
+                 size_t &left_weight, size_t &right_weight)
+{
+  // Fork nodes have k > 1. Both shifts are below the word width even for
+  // k == SwoWordBits(), and masks depend only on the public node shape.
+  const size_t left_mask = (size_t(1) << left_k) - 1;
+  const size_t right_mask = ((size_t(1) << right_k) - 1) << left_k;
+  size_t i = 0;
+#if defined(__SSE2__) && defined(__x86_64__) && !defined(__ILP32__)
+  const TagUVec64 left_masks = {left_mask, left_mask};
+  const TagUVec64 right_masks = {right_mask, right_mask};
+  TagUVec64 left_count = {0, 0};
+  TagUVec64 right_count = {0, 0};
+  for (; n - i >= 8; i += 8)
+  {
+    const TagUVec64 first = OneWordTagPair(membership + i, left_masks, right_masks,
+                                        left_count, right_count);
+    const TagUVec64 second = OneWordTagPair(membership + i + 2, left_masks, right_masks,
+                                         left_count, right_count);
+    const TagUVec64 third = OneWordTagPair(membership + i + 4, left_masks, right_masks,
+                                        left_count, right_count);
+    const TagUVec64 fourth = OneWordTagPair(membership + i + 6, left_masks, right_masks,
+                                         left_count, right_count);
+    const TagVec32 low = (TagVec32)__builtin_ia32_punpcklqdq128(
+        (TagVec64)__builtin_ia32_pshufd((TagVec32)first, 0x88),
+        (TagVec64)__builtin_ia32_pshufd((TagVec32)second, 0x88));
+    const TagVec32 high = (TagVec32)__builtin_ia32_punpcklqdq128(
+        (TagVec64)__builtin_ia32_pshufd((TagVec32)third, 0x88),
+        (TagVec64)__builtin_ia32_pshufd((TagVec32)fourth, 0x88));
+    const TagVec16 zero16 = {0, 0, 0, 0, 0, 0, 0, 0};
+    const TagVec16 tag_words = __builtin_ia32_packssdw128(low, high);
+    const TagVec8 tag_bytes = __builtin_ia32_packuswb128(tag_words, zero16);
+    std::memcpy(tags + i, &tag_bytes, 8);
+  }
+  left_weight += static_cast<size_t>(left_count[0]) + static_cast<size_t>(left_count[1]);
+  right_weight += static_cast<size_t>(right_count[0]) + static_cast<size_t>(right_count[1]);
+#endif
+  for (; i < n; ++i)
+  {
+    const size_t row = membership[i];
+    const uint8_t has_left = static_cast<uint8_t>((row & left_mask) != 0);
+    const uint8_t has_right = static_cast<uint8_t>((row & right_mask) != 0);
+    tags[i] = static_cast<uint8_t>((has_left << 1U) | has_right);
+    left_weight += has_left;
+    right_weight += has_right;
+  }
+}
+
 void CheckMembershipShape(const std::vector<size_t> &membership,
                           size_t n, size_t k)
 {
@@ -86,8 +166,54 @@ void CheckMembershipShape(const std::vector<size_t> &membership,
     throw std::invalid_argument("OFRSupple membership dimensions mismatch");
 }
 
+struct ShapeControlCount
+{
+  size_t n, left_n, right_n, count;
+};
+
+struct ControlWriteWorkspace
+{
+  std::vector<uint8_t> tags;
+  std::vector<uint8_t> features;
+  swo_detail::SwoMarkWorkspace routed;
+  swo_detail::SwoMarkWorkspace left;
+  swo_detail::SwoMarkWorkspace right;
+  swo_detail::SwoMarkWorkspace child;
+};
+
+struct ControlWriteContext
+{
+  explicit ControlWriteContext(size_t k)
+      : workspaces(swo_detail::WorkspaceDepth(k) + 1) {}
+  std::vector<ControlWriteWorkspace> workspaces;
+  std::vector<ShapeControlCount> shapes;
+};
+
+size_t ShapeCount(std::vector<ShapeControlCount> &shapes,
+                  size_t n, size_t left_n, size_t right_n)
+{
+  for (const ShapeControlCount &shape : shapes)
+    if (shape.n == n && shape.left_n == left_n && shape.right_n == right_n)
+      return shape.count;
+  const size_t count = ofr::OFRControlCount(n, left_n, right_n);
+  shapes.push_back({n, left_n, right_n, count});
+  return count;
+}
+
+void ReserveMarks(swo_detail::SwoMarkWorkspace &workspace,
+                  size_t items, size_t words)
+{
+  size_t required = 0;
+  if (MulOverflowSizeT(items, words, &required))
+    throw std::length_error("OFRSupple membership size overflow");
+  // Reserve exactly the public maximum so sibling growth does not double
+  // capacity beyond the workspace estimate.
+  workspace.mark_buf.reserve(required);
+}
+
 OFRSuppleControlCounts CountNode(
-    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k)
+    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
+    std::vector<ShapeControlCount> &shapes)
 {
   if (k == 1)
     return {n == m ? 0 : n, 0};
@@ -99,9 +225,9 @@ OFRSuppleControlCounts CountNode(
   {
     const size_t left_n = m * left_k;
     const size_t right_n = n - left_n;
-    result.ofr_words = ofr::OFRControlCount(n, left_n, right_n);
-    const OFRSuppleControlCounts left = CountNode({}, left_n, m, left_k);
-    const OFRSuppleControlCounts right = CountNode({}, right_n, m, right_k);
+    result.ofr_words = ShapeCount(shapes, n, left_n, right_n);
+    const OFRSuppleControlCounts left = CountNode({}, left_n, m, left_k, shapes);
+    const OFRSuppleControlCounts right = CountNode({}, right_n, m, right_k, shapes);
     if (AddOverflowSizeT(result.swo_bits, left.swo_bits, &result.swo_bits) ||
         AddOverflowSizeT(result.swo_bits, right.swo_bits, &result.swo_bits) ||
         AddOverflowSizeT(result.ofr_words, left.ofr_words, &result.ofr_words) ||
@@ -113,7 +239,8 @@ OFRSuppleControlCounts CountNode(
   for (const FrontierNode &node : ChildrenOrFrontier(frontier, k))
   {
     const size_t child_n = SwoNodeCapacity(n, m, node.count);
-    const OFRSuppleControlCounts child = CountNode({}, child_n, m, node.count);
+    const OFRSuppleControlCounts child = CountNode({}, child_n, m, node.count,
+                                                 shapes);
     if ((child_n < n && AddOverflowSizeT(result.swo_bits, n,
                                          &result.swo_bits)) ||
         AddOverflowSizeT(result.swo_bits, child.swo_bits, &result.swo_bits) ||
@@ -123,10 +250,34 @@ OFRSuppleControlCounts CountNode(
   return result;
 }
 
+bool PostOrderedNode(size_t n, size_t left_n, size_t right_n)
+{
+  return n >= 2 && (n & (n - 1)) == 0 &&
+         left_n == n / 2 && right_n == n / 2;
+}
+
+void RecordPreparedNode(OFRSuppleControls &controls, size_t offset,
+                        size_t count, size_t n, size_t left_n,
+                        size_t right_n, bool postordered)
+{
+  size_t shape_index = 0;
+  for (; shape_index < controls.shapes.size(); ++shape_index)
+  {
+    const OFRSuppleControls::Shape &shape = controls.shapes[shape_index];
+    if (shape.n == n && shape.n_left == left_n && shape.n_right == right_n)
+      break;
+  }
+  if (shape_index == controls.shapes.size())
+    controls.shapes.push_back({n, left_n, right_n});
+  controls.nodes.push_back({offset, shape_index, postordered, count});
+}
+
 OFRSuppleControlPositions WriteNode(
-    const size_t *membership, size_t words, OFRSuppleControls &controls,
+    const size_t *membership, size_t *owned_membership, size_t words,
+    OFRSuppleControls &controls,
     const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
-    OFRSuppleControlPositions position, enc_ret *profile)
+    OFRSuppleControlPositions position, enc_ret *profile, bool prepared,
+    ControlWriteContext &context, size_t depth)
 {
   double *tags_ms = profile ? &profile->offline_tags_ms : nullptr;
   double *normalize_ms = profile ? &profile->offline_normalize_ms : nullptr;
@@ -136,6 +287,7 @@ OFRSuppleControlPositions WriteNode(
   double *swo_write_ms = profile ? &profile->offline_swo_write_ms : nullptr;
   if (k == 1 && n == m)
     return position;
+  ControlWriteWorkspace &workspace = context.workspaces[depth];
 
   if (k > 1 && ForkNode(n, m, k))
   {
@@ -143,57 +295,111 @@ OFRSuppleControlPositions WriteNode(
     const size_t right_k = k - left_k;
     const size_t left_n = m * left_k;
     const size_t right_n = n - left_n;
-    swo_detail::SwoMarkWorkspace left;
-    swo_detail::SwoMarkWorkspace right;
+    const bool postordered = prepared && PostOrderedNode(n, left_n, right_n);
+    swo_detail::SwoMarkWorkspace &left = workspace.left;
+    swo_detail::SwoMarkWorkspace &right = workspace.right;
     {
       const size_t start = position.ofr_words;
-      {
-        std::vector<uint8_t> tags;
-        online_profile::Track(tags_ms, [&] {
-          tags.resize(n);
-          for (size_t i = 0; i < n; ++i)
-          {
-            const size_t *row = membership + i * words;
-            tags[i] = static_cast<uint8_t>(
-                (HasMembership(row, words, 0, left_k) << 1U) |
-                HasMembership(row, words, left_k, right_k));
-          }
+      const size_t control_count = ShapeCount(context.shapes, n, left_n, right_n);
+      size_t *routed = owned_membership;
+      if (routed == nullptr)
+        online_profile::Track(replay_ms, [&] {
+          // Only the externally owned root needs a copy. Projected children
+          // belong to this writer and can be routed in place.
+          ReserveMarks(workspace.routed, n, words);
+          workspace.routed.ensure_capacity(n, words);
+          routed = workspace.routed.mark_ptr();
+          std::copy(membership, membership + n * words, routed);
         });
-        std::vector<uint8_t> normalized;
+      {
+        std::vector<uint8_t> &tags = workspace.tags;
+        size_t left_weight = 0, right_weight = 0;
+        online_profile::Track(tags_ms, [&] {
+          tags.reserve(n);
+          tags.resize(n);
+          if (words == 1 && k <= swo_detail::SwoWordBits())
+            OneWordTags(membership, tags.data(), n, left_k, right_k,
+                        left_weight, right_weight);
+          else
+            for (size_t i = 0; i < n; ++i)
+            {
+              const size_t *row = membership + i * words;
+              const uint8_t has_left = HasMembership(row, words, 0, left_k);
+              const uint8_t has_right = HasMembership(row, words, left_k, right_k);
+              tags[i] = static_cast<uint8_t>((has_left << 1U) | has_right);
+              left_weight += has_left;
+              right_weight += has_right;
+            }
+        });
         online_profile::Track(normalize_ms, [&] {
-          normalized = ofr::OFRNormalize(tags, n, left_n, right_n);
+          ofr::detail::OFRNormalizeOwnedInPlace(
+              tags, n, left_n, right_n, left_weight, right_weight);
         });
         online_profile::Track(ofr_write_ms, [&] {
-          position.ofr_words = ofr::OFRControlWrite(
-              normalized, controls.ofr, n, left_n, right_n, start);
+          if (postordered)
+            position.ofr_words = ofr::detail::OFRControlWritePostOrderAndRouteNormalized(
+                tags, controls.ofr, routed, words,
+                n, left_n, right_n, start, control_count);
+          else
+          {
+            workspace.features.reserve(n / 2);
+            position.ofr_words = ofr::detail::OFRControlWriteAndRouteNormalized(
+                tags, controls.ofr, routed, words,
+                n, left_n, right_n, start, control_count, &workspace.features);
+          }
         });
       }
-
-      size_t routed_words = 0;
-      if (MulOverflowSizeT(n, words, &routed_words))
-        throw std::length_error("OFRSupple membership size overflow");
-      std::vector<size_t> routed;
-      online_profile::Track(replay_ms, [&] {
-        routed.assign(membership, membership + routed_words);
-        ofr::OFRApplyWordsInPlace(
-            routed.data(), words, controls.ofr, start, n, left_n, right_n);
-      });
-      if (position.ofr_words - start !=
-          ofr::OFRControlCount(n, left_n, right_n))
+      if (position.ofr_words - start != control_count)
         throw std::logic_error("OFRSupple OFR replay offset mismatch");
+      if (prepared)
+        online_profile::Track(profile ? &profile->offline_prepare_ms : nullptr,
+                              [&] {
+          RecordPreparedNode(controls, start, position.ofr_words - start,
+                             n, left_n, right_n, postordered);
+        });
 
       online_profile::Track(project_ms, [&] {
-        swo_detail::ProjectMarkToWorkspace(
-            routed.data(), left_n, words, 0, left_k, left);
-        swo_detail::ProjectMarkToWorkspace(
-            routed.data() + left_n * words, right_n, words,
-            left_k, right_k, right);
+        // A fork leaf has n == m, so WriteNode returns before inspecting its
+        // membership. Only internal children need an offline projection.
+        if (left_k > 1)
+        {
+          ReserveMarks(left, left_n, MarkWords(left_k));
+          if (words == 1)
+          {
+            left.ensure_capacity(left_n, 1);
+            const size_t mask = (size_t(1) << left_k) - 1;
+            size_t *destination = left.mark_ptr();
+            for (size_t i = 0; i < left_n; ++i)
+              destination[i] = routed[i] & mask;
+          }
+          else
+            swo_detail::ProjectMarkToWorkspace(
+                routed, left_n, words, 0, left_k, left);
+        }
+        if (right_k > 1)
+        {
+          ReserveMarks(right, right_n, MarkWords(right_k));
+          if (words == 1)
+          {
+            right.ensure_capacity(right_n, 1);
+            const size_t mask = (size_t(1) << right_k) - 1;
+            size_t *destination = right.mark_ptr();
+            for (size_t i = 0; i < right_n; ++i)
+              destination[i] = (routed[left_n + i] >> left_k) & mask;
+          }
+          else
+            swo_detail::ProjectMarkToWorkspace(
+                routed + left_n * words, right_n, words,
+                left_k, right_k, right);
+        }
       });
     }
-    position = WriteNode(left.mark_ptr(), MarkWords(left_k), controls, {},
-                         left_n, m, left_k, position, profile);
-    return WriteNode(right.mark_ptr(), MarkWords(right_k), controls, {},
-                     right_n, m, right_k, position, profile);
+    position = WriteNode(left.mark_ptr(), left.mark_ptr(), MarkWords(left_k),
+                         controls, {}, left_n, m, left_k, position, profile,
+                         prepared, context, depth + 1);
+    return WriteNode(right.mark_ptr(), right.mark_ptr(), MarkWords(right_k),
+                     controls, {}, right_n, m, right_k, position, profile,
+                     prepared, context, depth + 1);
   }
 
   const std::vector<FrontierNode> nodes =
@@ -202,13 +408,14 @@ OFRSuppleControlPositions WriteNode(
   for (const FrontierNode &node : nodes)
   {
     const size_t child_n = SwoNodeCapacity(n, m, node.count);
-    swo_detail::SwoMarkWorkspace child;
+    swo_detail::SwoMarkWorkspace &child = workspace.child;
     if (child_n < n)
       online_profile::Track(swo_write_ms, [&] {
         swo_detail::SwoCheckControlSpan(controls.swo, position.swo_bits, n);
         bool *selected = swo_detail::AcquireSelectedScratch(n);
         if (selected == nullptr)
           throw std::bad_alloc();
+        ReserveMarks(child, n, MarkWords(node.count));
         swo_detail::CompactMarkToWorkspaceAndControl(
             membership, n, words, selected, child_n, node.start, node.count,
             controls.swo, position.swo_bits, child);
@@ -216,62 +423,76 @@ OFRSuppleControlPositions WriteNode(
       });
     else
       online_profile::Track(project_ms, [&] {
+        ReserveMarks(child, n, MarkWords(node.count));
         swo_detail::ProjectMarkToWorkspace(
             membership, n, words, node.start, node.count, child);
       });
     if (node.count > 1)
-      position = WriteNode(child.mark_ptr(), MarkWords(node.count), controls,
-                           {}, child_n, m, node.count, position, profile);
+      position = WriteNode(child.mark_ptr(), child.mark_ptr(),
+                           MarkWords(node.count), controls, {}, child_n, m,
+                           node.count, position, profile, prepared, context,
+                           depth + 1);
   }
   return position;
 }
 
-void PrepareNode(OFRSuppleControls &controls,
-                 const std::vector<FrontierNode> &frontier,
-                 size_t n, size_t m, size_t k, size_t &offset)
+OFRSuppleControlPositions ValidateReadPlanNode(
+    const OFRSuppleControls &controls,
+    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
+    OFRSuppleControlPositions position, size_t &node_index,
+    std::vector<ShapeControlCount> &shape_counts)
 {
-  if (k == 1)
-    return;
-  if (ForkNode(n, m, k))
+  if (k == 1 && n == m)
+    return position;
+  if (k > 1 && ForkNode(n, m, k))
   {
     const size_t left_k = k / 2;
+    const size_t right_k = k - left_k;
     const size_t left_n = m * left_k;
     const size_t right_n = n - left_n;
-    const size_t count = ofr::OFRControlCount(n, left_n, right_n);
-    if (offset > controls.ofr.size() || count > controls.ofr.size() - offset)
-      throw std::length_error("OFRSupple preparation exceeds control tape");
-
-    size_t shape_index = 0;
-    for (; shape_index < controls.shapes.size(); ++shape_index)
+    const size_t count = ShapeCount(shape_counts, n, left_n, right_n);
+    if (position.ofr_words > controls.ofr.size() ||
+        count > controls.ofr.size() - position.ofr_words)
+      throw std::length_error("OFRSupple prepared node exceeds control tape");
+    if (!controls.nodes.empty())
     {
-      const OFRSuppleControls::Shape &shape = controls.shapes[shape_index];
-      if (shape.n == n && shape.n_left == left_n &&
-          shape.n_right == right_n)
-        break;
+      if (node_index >= controls.nodes.size())
+        throw std::length_error("OFRSupple prepared node is missing");
+      const OFRSuppleControls::Node &plan = controls.nodes[node_index++];
+      if (plan.offset != position.ofr_words ||
+          plan.shape_index >= controls.shapes.size())
+        throw std::logic_error("OFRSupple prepared node offset mismatch");
+      if (plan.count != count)
+        throw std::logic_error("OFRSupple prepared node length mismatch");
+      const OFRSuppleControls::Shape &shape = controls.shapes[plan.shape_index];
+      if (shape.n != n || shape.n_left != left_n || shape.n_right != right_n)
+        throw std::logic_error("OFRSupple prepared node shape mismatch");
+      if (plan.postordered && !PostOrderedNode(n, left_n, right_n))
+        throw std::logic_error("OFRSupple postorder node is not balanced");
     }
-    if (shape_index == controls.shapes.size())
-      controls.shapes.push_back({n, left_n, right_n});
-
-    const bool postordered = n >= 2 && (n & (n - 1)) == 0 &&
-                             left_n == n / 2 && right_n == n / 2;
-    if (postordered)
-    {
-      const std::vector<uint8_t> postorder = ofr::OFRPostOrderControls(
-          controls.ofr.data() + offset, count, n, left_n, right_n);
-      std::copy(postorder.begin(), postorder.end(),
-                controls.ofr.begin() + offset);
-    }
-    controls.nodes.push_back({offset, shape_index, postordered, count});
-    offset += count;
-    PrepareNode(controls, {}, left_n, m, left_k, offset);
-    PrepareNode(controls, {}, right_n, m, k - left_k, offset);
-    return;
+    position.ofr_words += count;
+    position = ValidateReadPlanNode(controls, {}, left_n, m, left_k,
+                                    position, node_index, shape_counts);
+    return ValidateReadPlanNode(controls, {}, right_n, m, right_k,
+                                position, node_index, shape_counts);
   }
 
-  for (const FrontierNode &node : ChildrenOrFrontier(frontier, k))
+  const std::vector<FrontierNode> nodes =
+      k == 1 ? std::vector<FrontierNode>{{0, 1}}
+             : ChildrenOrFrontier(frontier, k);
+  for (const FrontierNode &node : nodes)
+  {
+    const size_t child_n = SwoNodeCapacity(n, m, node.count);
+    if (child_n < n)
+    {
+      swo_detail::SwoCheckControlSpan(controls.swo, position.swo_bits, n);
+      position.swo_bits += n;
+    }
     if (node.count > 1)
-      PrepareNode(controls, {}, SwoNodeCapacity(n, m, node.count),
-                  m, node.count, offset);
+      position = ValidateReadPlanNode(controls, {}, child_n, m, node.count,
+                                      position, node_index, shape_counts);
+  }
+  return position;
 }
 
 OFRSuppleReadResult ReadNode(
@@ -331,26 +552,26 @@ OFRSuppleReadResult ReadNode(
     if (plan.offset > controls.ofr.size() ||
         plan.count > controls.ofr.size() - plan.offset)
       throw std::length_error("OFRSupple prepared node exceeds control tape");
-    if (plan.count != ofr::OFRControlCount(n, left_n, right_n))
-      throw std::logic_error("OFRSupple prepared node length mismatch");
+    // The public read preflight has checked canonical counts and layouts for
+    // the entire plan before any output writes; retain cheap local checks.
     const OFRSuppleControls::Shape &shape = controls.shapes[plan.shape_index];
     if (shape.n != n || shape.n_left != left_n || shape.n_right != right_n)
       throw std::logic_error("OFRSupple prepared node shape mismatch");
     swo_detail::SwoDataWorkspace &work = workspaces[depth];
     online_profile::Track(copy_ms, [&] {
+      work.data_buf.reserve(n * block_size);
       work.ensure_capacity(n, block_size);
       std::memcpy(work.data_ptr(), data, n * block_size);
     });
     online_profile::Track(route_ms, [&] {
-      const uint8_t *tape = controls.ofr.data() + plan.offset;
+      const ofr::PackedControlView tape =
+          controls.ofr.view(plan.offset, plan.count);
       if (plan.postordered)
         ofr::OFRApplyPreparedPostOrderInPlace(
-            work.data_ptr(), tape, plan.count,
-            n, left_n, right_n, block_size);
+            work.data_ptr(), tape, n, left_n, right_n, block_size);
       else
         ofr::OFRApplyPreparedInPlace(
-            work.data_ptr(), tape, plan.count,
-            n, left_n, right_n, block_size);
+            work.data_ptr(), tape, n, left_n, right_n, block_size);
     });
     position.ofr_words += plan.count;
     const OFRSuppleReadResult left = ReadNode(
@@ -374,6 +595,7 @@ OFRSuppleReadResult ReadNode(
     const size_t child_n = SwoNodeCapacity(n, m, node.count);
     swo_detail::SwoDataWorkspace &child = workspaces[depth];
     online_profile::Track(copy_ms, [&] {
+      child.data_buf.reserve(n * block_size);
       child.ensure_capacity(n, block_size);
       std::memcpy(child.data_ptr(), data, n * block_size);
     });
@@ -416,87 +638,38 @@ OFRSuppleReadResult ReadNode(
   return {written, position};
 }
 
-} // namespace
-
-OFRSuppleControlCounts OFRSuppleControlCount(
-    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k)
-{
-  CheckDimensions(n, m, k);
-  CheckFrontier(frontier, n, m, k);
-  return CountNode(frontier, n, m, k);
-}
-
-OFRSuppleControlPositions OFRSuppleControlWrite(
-    const std::vector<size_t> &membership, OFRSuppleControls &controls,
+OFRSuppleControls BuildControls(
+    const std::vector<size_t> &membership,
     const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
-    OFRSuppleControlPositions position, enc_ret *profile)
+    enc_ret *profile, OFRSuppleControlCounts *counts_out,
+    size_t *owned_root = nullptr)
 {
   CheckDimensions(n, m, k);
   CheckFrontier(frontier, n, m, k);
   CheckMembershipShape(membership, n, k);
-  return WriteNode(membership.data(), MarkWords(k), controls, frontier,
-                   n, m, k, position, profile);
-}
-
-OFRSuppleControls OFRSuppleControl(
-    const std::vector<size_t> &membership,
-    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
-    enc_ret *profile)
-{
+  ControlWriteContext context(k);
   OFRSuppleControlCounts counts;
   online_profile::Track(profile ? &profile->offline_count_ms : nullptr, [&] {
-    counts = OFRSuppleControlCount(frontier, n, m, k);
+    counts = CountNode(frontier, n, m, k, context.shapes);
   });
   OFRSuppleControls controls;
   controls.swo.resize(counts.swo_bits / 8 + (counts.swo_bits % 8 != 0), 0);
   controls.ofr.resize(counts.ofr_words, 0);
-  const OFRSuppleControlPositions end = OFRSuppleControlWrite(
-      membership, controls, frontier, n, m, k, {0, 0}, profile);
+  const OFRSuppleControlPositions end = WriteNode(
+      membership.data(), owned_root, MarkWords(k), controls, frontier, n, m, k,
+      {0, 0}, profile, true, context, 0);
   if (end.swo_bits != counts.swo_bits || end.ofr_words != counts.ofr_words)
     throw std::logic_error("OFRSupple control write/count mismatch");
-  size_t prepared_end = 0;
-  online_profile::Track(profile ? &profile->offline_prepare_ms : nullptr, [&] {
-    PrepareNode(controls, frontier, n, m, k, prepared_end);
-  });
-  if (prepared_end != counts.ofr_words)
-    throw std::logic_error("OFRSupple preparation/count mismatch");
+  if (counts_out != nullptr)
+    *counts_out = counts;
   return controls;
 }
 
-OFRSuppleReadResult OFRSuppleControlRead(
+std::vector<unsigned char> ApplyKnownControls(
     const unsigned char *data, const OFRSuppleControls &controls,
     const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
-    size_t block_size, unsigned char *samples, size_t out_capacity_blocks,
-    OFRSuppleControlPositions position, enc_ret *profile)
+    size_t block_size, const OFRSuppleControlCounts &counts)
 {
-  CheckDimensions(n, m, k);
-  CheckFrontier(frontier, n, m, k);
-  size_t data_bytes = 0, output_bytes = 0;
-  if (data == nullptr || samples == nullptr || block_size == 0 ||
-      MulOverflowSizeT(n, block_size, &data_bytes) ||
-      MulOverflowSizeT(out_capacity_blocks, block_size, &output_bytes))
-    throw std::invalid_argument("Invalid OFRSupple data dimensions");
-  (void)data_bytes;
-  (void)output_bytes;
-  std::vector<swo_detail::SwoDataWorkspace> workspaces(
-      swo_detail::WorkspaceDepth(k) + 1);
-  size_t node_index = 0;
-  const OFRSuppleReadResult read = ReadNode(
-      data, controls, frontier, n, m, k, block_size,
-      samples, out_capacity_blocks, position, workspaces, 0, node_index,
-      profile);
-  if (!controls.nodes.empty() && node_index != controls.nodes.size())
-    throw std::logic_error("OFRSupple prepared node count mismatch");
-  return read;
-}
-
-std::vector<unsigned char> OFRSuppleApply(
-    const unsigned char *data, const OFRSuppleControls &controls,
-    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
-    size_t block_size)
-{
-  const OFRSuppleControlCounts counts =
-      OFRSuppleControlCount(frontier, n, m, k);
   if (controls.swo.size() !=
           counts.swo_bits / 8 + (counts.swo_bits % 8 != 0) ||
       controls.ofr.size() != counts.ofr_words)
@@ -516,6 +689,90 @@ std::vector<unsigned char> OFRSuppleApply(
   return result;
 }
 
+} // namespace
+
+OFRSuppleControlCounts OFRSuppleControlCount(
+    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k)
+{
+  CheckDimensions(n, m, k);
+  CheckFrontier(frontier, n, m, k);
+  std::vector<ShapeControlCount> shapes;
+  return CountNode(frontier, n, m, k, shapes);
+}
+
+OFRSuppleControlPositions OFRSuppleControlWrite(
+    const std::vector<size_t> &membership, OFRSuppleControls &controls,
+    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
+    OFRSuppleControlPositions position, enc_ret *profile)
+{
+  CheckDimensions(n, m, k);
+  CheckFrontier(frontier, n, m, k);
+  CheckMembershipShape(membership, n, k);
+  ControlWriteContext context(k);
+  return WriteNode(membership.data(), nullptr, MarkWords(k), controls, frontier,
+                   n, m, k, position, profile, false, context, 0);
+}
+
+OFRSuppleControls OFRSuppleControl(
+    const std::vector<size_t> &membership,
+    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
+    enc_ret *profile)
+{
+  return BuildControls(membership, frontier, n, m, k, profile, nullptr);
+}
+
+OFRSuppleReadResult OFRSuppleControlRead(
+    const unsigned char *data, const OFRSuppleControls &controls,
+    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
+    size_t block_size, unsigned char *samples, size_t out_capacity_blocks,
+    OFRSuppleControlPositions position, enc_ret *profile)
+{
+  CheckDimensions(n, m, k);
+  CheckFrontier(frontier, n, m, k);
+  size_t data_bytes = 0, output_bytes = 0;
+  if (data == nullptr || samples == nullptr || block_size == 0 ||
+      MulOverflowSizeT(n, block_size, &data_bytes) ||
+      MulOverflowSizeT(out_capacity_blocks, block_size, &output_bytes))
+    throw std::invalid_argument("Invalid OFRSupple data dimensions");
+  (void)data_bytes;
+  (void)output_bytes;
+  size_t required_blocks = 0;
+  if (MulOverflowSizeT(m, k, &required_blocks) ||
+      out_capacity_blocks < required_blocks)
+    throw std::length_error("OFRSupple output exceeds buffer");
+  std::vector<ShapeControlCount> shape_counts;
+  size_t planned_nodes = 0;
+  const OFRSuppleControlPositions planned_end = ValidateReadPlanNode(
+      controls, frontier, n, m, k, position, planned_nodes, shape_counts);
+  if (!controls.nodes.empty() && planned_nodes != controls.nodes.size())
+    throw std::logic_error("OFRSupple prepared node count mismatch");
+  std::vector<swo_detail::SwoDataWorkspace> workspaces(
+      swo_detail::WorkspaceDepth(k) + 1);
+  size_t node_index = 0;
+  const OFRSuppleReadResult read = ReadNode(
+      data, controls, frontier, n, m, k, block_size,
+      samples, out_capacity_blocks, position, workspaces, 0, node_index,
+      profile);
+  if (!controls.nodes.empty() && node_index != controls.nodes.size())
+    throw std::logic_error("OFRSupple prepared node count mismatch");
+  if (read.written_blocks != required_blocks ||
+      read.next.swo_bits != planned_end.swo_bits ||
+      read.next.ofr_words != planned_end.ofr_words)
+    throw std::logic_error("OFRSupple read/preflight mismatch");
+  return read;
+}
+
+std::vector<unsigned char> OFRSuppleApply(
+    const unsigned char *data, const OFRSuppleControls &controls,
+    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
+    size_t block_size)
+{
+  const OFRSuppleControlCounts counts =
+      OFRSuppleControlCount(frontier, n, m, k);
+  return ApplyKnownControls(data, controls, frontier, n, m, k, block_size,
+                           counts);
+}
+
 std::vector<unsigned char> OFRSupple(
     const unsigned char *data, size_t n, size_t m, size_t k, size_t block_size)
 {
@@ -526,10 +783,14 @@ std::vector<unsigned char> OFRSupple(
   const std::vector<FrontierNode> frontier =
       MulOverflowSizeT(m, k, &capacity) || capacity > n
           ? SWOFrontier(n, m, k) : std::vector<FrontierNode>{};
-  const std::vector<size_t> membership = SWOMark(n, m, k);
+  std::vector<size_t> membership = SWOMark(n, m, k);
+  OFRSuppleControlCounts counts;
   const OFRSuppleControls controls =
-      OFRSuppleControl(membership, frontier, n, m, k);
-  return OFRSuppleApply(data, controls, frontier, n, m, k, block_size);
+      BuildControls(membership, frontier, n, m, k, nullptr, &counts,
+                    membership.data());
+  std::vector<size_t>().swap(membership);
+  return ApplyKnownControls(data, controls, frontier, n, m, k, block_size,
+                           counts);
 }
 
 extern "C" void DecOFRSupple(unsigned char *encrypted_buffer,
@@ -580,14 +841,14 @@ extern "C" void DecOFRSupple(unsigned char *encrypted_buffer,
       frontier = MulOverflowSizeT(M, K, &capacity) || capacity > N
           ? SWOFrontier(N, M, K) : std::vector<FrontierNode>{};
     });
-    const OFRSuppleControls controls =
-        OFRSuppleControl(membership, frontier, N, M, K,
-                         ret->collect_offline_profile ? ret : nullptr);
     OFRSuppleControlCounts counts;
-    online_profile::Track(ret->collect_offline_profile
-                              ? &ret->offline_count_ms : nullptr, [&] {
-      counts = OFRSuppleControlCount(frontier, N, M, K);
-    });
+    const OFRSuppleControls controls = BuildControls(
+        membership, frontier, N, M, K,
+        ret->collect_offline_profile ? ret : nullptr, &counts,
+        membership.data());
+    // Include workspace destruction and releasing the root in real offline
+    // time; online no longer retains membership that it never reads.
+    std::vector<size_t>().swap(membership);
     ocall_clock(&end);
     ret->gen_perm_time = static_cast<double>(end - start) / 1000.0;
     if (ret->collect_offline_profile)

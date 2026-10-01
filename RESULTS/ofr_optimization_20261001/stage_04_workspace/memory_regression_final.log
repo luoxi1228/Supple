@@ -1,0 +1,52 @@
+......
+----------------------------------------------------------------------
+Ran 6 tests in 0.015s
+
+OK
+Backed up legacy heap estimates: /tmp/tmp2pz74t02/mode2.heap_est_backup.csv
+Backed up legacy heap estimates: /tmp/tmp2pz74t02/mode2.heap_est_backup.1.csv
+Backed up legacy heap estimates: /tmp/tmp2pz74t02/mode4.heap_est_backup.csv
+Backed up legacy heap estimates: /tmp/tmp2pz74t02/mode4.heap_est_backup.1.csv
+Backed up legacy heap estimates: /tmp/tmp2pz74t02/mode5.heap_est_backup.csv
+Backed up legacy heap estimates: /tmp/tmp2pz74t02/mode5.heap_est_backup.1.csv
+Backed up legacy heap estimates: /tmp/tmp2pz74t02/mode1.heap_est_backup.csv
+Backed up legacy heap estimates: /tmp/tmp2pz74t02/mode1.heap_est_backup.1.csv
+Backed up legacy heap estimates: /tmp/tmp2pz74t02/mode3.heap_est_backup.csv
+Backed up legacy heap estimates: /tmp/tmp2pz74t02/mode3.heap_est_backup.1.csv
+Running experiment: mode = 1 (ShuffleBasedSWO), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 64.00 MB
+Measured algorithm heap peak: 1048576 bytes (1.000000 MiB)
+Out_lines: ('1', '2', '3', '4', 5)
+
+Running experiment: mode = 2 (PSQF_SWO), b = 24, p = 0.2500, n = 64, m = 16, k = 4, heap_est = 64.00 MB
+Measured algorithm heap peak: 1048576 bytes (1.000000 MiB)
+Out_lines: ('1', '2', 5)
+
+Running experiment: mode = 3 (CompactionBasedSWO), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 64.00 MB
+Measured algorithm heap peak: 1048576 bytes (1.000000 MiB)
+Out_lines: ('1', '2', '3', '4', 5)
+
+Running experiment: mode = 4 (Supple), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 64.00 MB
+Measured algorithm heap peak: 1048576 bytes (1.000000 MiB)
+Out_lines: ('1', '2', '3', '4', 5)
+
+Running experiment: mode = 5 (OFRSupple), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 64.00 MB
+Measured algorithm heap peak: 1048576 bytes (1.000000 MiB)
+Out_lines: ('1', '2', '3', '4', 5)
+
+Running experiment: mode = 1 (ShuffleBasedSWO), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 64.00 MB
+Algorithm heap measurement is missing or invalid; skipping result
+Running experiment: mode = 2 (PSQF_SWO), b = 24, p = 0.2500, n = 64, m = 16, k = 4, heap_est = 64.00 MB
+Algorithm heap measurement is missing or invalid; skipping result
+Running experiment: mode = 3 (CompactionBasedSWO), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 64.00 MB
+Algorithm heap measurement is missing or invalid; skipping result
+Running experiment: mode = 4 (Supple), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 64.00 MB
+Algorithm heap measurement is missing or invalid; skipping result
+Running experiment: mode = 5 (OFRSupple), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 64.00 MB
+Algorithm heap measurement is missing or invalid; skipping result
+Each mode must be one of: 1,2,3,4,5,10,11,12,13,14
+Each mode must be one of: 1,2,3,4,5,10,11,12,13,14
+Each mode must be one of: 1,2,3,4,5,10,11,12,13,14
+Each mode must be one of: 1,2,3,4,5,10,11,12,13,14
+Each mode must be one of: 1,2,3,4,5,10,11,12,13,14
+Each mode must be one of: 1,2,3,4,5,10,11,12,13,14
+PASS: memory tracker and CSV regressions (/tmp/supple-memory-test.ZcVpLD)

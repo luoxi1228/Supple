@@ -1,0 +1,8 @@
+[
+  "/tmp/supple-ofr-batch.7ofmpbip/paired_sgx_benchmark",
+  "/tmp/supple-ofr-batch.7ofmpbip/benchmark.signed.so",
+  "--rounds",
+  "7",
+  "--warmup",
+  "2"
+]

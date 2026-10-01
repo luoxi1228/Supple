@@ -1,0 +1,8 @@
+[
+  "/tmp/supple-ofr-batch.nqp38c2s/paired_sgx_benchmark",
+  "/tmp/supple-ofr-batch.nqp38c2s/benchmark.signed.so",
+  "--rounds",
+  "7",
+  "--warmup",
+  "2"
+]

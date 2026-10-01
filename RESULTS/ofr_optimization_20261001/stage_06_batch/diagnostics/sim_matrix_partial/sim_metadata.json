@@ -1,0 +1,26 @@
+{
+  "stage": "batch",
+  "backend": "sim",
+  "source": "/root/Supple",
+  "build": "/tmp/supple-ofr-batch.nqp38c2s",
+  "source_sha256": "04d765eb777ae5c9bcc4c8f670329761d3fe8847ddec5ae0e99179b47909d581",
+  "commit": "fb2fcac45d906eb91416291ce9705ba3d9d88140",
+  "rounds": 7,
+  "warmup": 2,
+  "matrix": true,
+  "case": null,
+  "from_stage": "/root/Supple/RESULTS/ofr_optimization_20261001/stage_06_batch",
+  "cpu_model": "Intel(R) Xeon(R) Platinum 8369B CPU @ 2.70GHz",
+  "cpu_affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "host": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
+  "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+}

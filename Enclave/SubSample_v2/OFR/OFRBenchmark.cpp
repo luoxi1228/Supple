@@ -12,7 +12,7 @@
 namespace
 {
 
-std::vector<uint8_t> g_ofr_controls;
+ofr::PackedControls g_ofr_controls;
 bool *g_ocompact_selected = NULL;
 size_t g_ofr_n = 0;
 size_t g_ofr_n_left = 0;
@@ -54,7 +54,7 @@ void ReleaseBenchmarkContext()
   g_ofr_n_left = 0;
   g_ofr_n_right = 0;
   g_ofr_postordered = false;
-  std::vector<uint8_t>().swap(g_ofr_controls);
+  ofr::PackedControls().swap(g_ofr_controls);
 }
 
 } // namespace
@@ -78,7 +78,7 @@ extern "C" int OFRCompactPrepare(uint8_t *routing_tags,
     ocall_clock(&start_time);
     const bool postordered = n >= 2 && (n & (n - 1)) == 0 &&
                              n_left == n / 2 && n_right == n / 2;
-    std::vector<uint8_t> controls = postordered
+    ofr::PackedControls controls = postordered
         ? ofr::OFRControlPostOrder(tags, n, n_left, n_right)
         : ofr::OFRControl(tags, n, n_left, n_right);
     ocall_clock(&stop_time);

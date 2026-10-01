@@ -1,0 +1,1074 @@
+diff --git a/Enclave/SubSample_v2/OFR/OFR.cpp b/Enclave/SubSample_v2/OFR/OFR.cpp
+index 96cd755..4f0864b 100644
+--- a/Enclave/SubSample_v2/OFR/OFR.cpp
++++ b/Enclave/SubSample_v2/OFR/OFR.cpp
+@@ -84,11 +84,11 @@ size_t OFRControlCountImpl(size_t n, size_t n_left, size_t n_right)
+   return result;
+ }
+ 
+-size_t OFRBalanceInPlaceImpl(uint8_t *tags, std::vector<uint8_t> &controls,
++size_t OFRBalanceInPlaceImpl(uint8_t *tags, PackedControls &controls, uint8_t *scratch,
+                              size_t base, size_t stride, size_t n,
+                              size_t n_left, size_t n_right, size_t position);
+ 
+-size_t OFRControlWriteImpl(uint8_t *tags, std::vector<uint8_t> &controls,
++size_t OFRControlWriteImpl(uint8_t *tags, PackedControls &controls, uint8_t *scratch,
+                            size_t base, size_t stride, size_t n,
+                            size_t n_left, size_t n_right, size_t position)
+ {
+@@ -107,15 +107,15 @@ size_t OFRControlWriteImpl(uint8_t *tags, std::vector<uint8_t> &controls,
+   }
+ 
+   position = OFRBalanceInPlaceImpl(
+-      tags, controls, base, stride, n, n_left, n_right, position);
++      tags, controls, scratch, base, stride, n, n_left, n_right, position);
+ 
+   const CapacitySplit split = SplitCapacities(n, n_left, n_right);
+-  position = OFRControlWriteImpl(tags, controls, base, stride * 2,
++  position = OFRControlWriteImpl(tags, controls, scratch, base, stride * 2,
+                                  split.n_top,
+                                  split.top_left,
+                                  split.top_right,
+                                  position);
+-  return OFRControlWriteImpl(tags, controls, base + stride, stride * 2,
++  return OFRControlWriteImpl(tags, controls, scratch, base + stride, stride * 2,
+                              split.n_bottom,
+                              split.bottom_left,
+                              split.bottom_right,
+@@ -125,7 +125,7 @@ size_t OFRControlWriteImpl(uint8_t *tags, std::vector<uint8_t> &controls,
+ // The two recursive children occupy the even and odd record lanes. Recurse
+ // with a doubled stride instead of materializing either child in a vector.
+ size_t OFRApplyStrided(unsigned char *data,
+-                       const uint8_t *controls,
++                       PackedControlView controls,
+                        size_t n,
+                        size_t n_left,
+                        size_t n_right,
+@@ -137,9 +137,10 @@ size_t OFRApplyStrided(unsigned char *data,
+     return position;
+ 
+   const size_t byte_stride = stride * block_size;
++  PackedControlCursor cursor(controls, position);
+   if (n == 2)
+   {
+-    detail::ApplyOFork(data, data + byte_stride, block_size, controls[position]);
++    detail::ApplyOFork(data, data + byte_stride, block_size, cursor.next());
+     return position + 1;
+   }
+ 
+@@ -150,7 +151,7 @@ size_t OFRApplyStrided(unsigned char *data,
+     detail::ApplyOFork(first,
+                        first + byte_stride,
+                        block_size,
+-                       controls[position + gate]);
++                       cursor.next());
+   }
+   position += gate_count;
+ 
+@@ -174,7 +175,7 @@ size_t OFRApplyStrided(unsigned char *data,
+ }
+ 
+ size_t OFRApplyWordsStrided(size_t *rows, size_t words_per_row,
+-                            const uint8_t *controls, size_t n,
++                            PackedControlView controls, size_t n,
+                             size_t n_left, size_t n_right,
+                             size_t stride, size_t position)
+ {
+@@ -182,12 +183,13 @@ size_t OFRApplyWordsStrided(size_t *rows, size_t words_per_row,
+     return position;
+ 
+   const size_t word_stride = stride * words_per_row;
++  PackedControlCursor cursor(controls, position);
+   const size_t gate_count = n / 2;
+   for (size_t gate = 0; gate < gate_count; ++gate)
+   {
+     size_t *first = rows + (2 * gate) * word_stride;
+     size_t *second = first + word_stride;
+-    const uint8_t control = controls[position + gate];
++    const uint8_t control = cursor.next();
+     const size_t top_mask = size_t(0) - size_t((control >> 1U) & 1U);
+     const size_t bottom_mask = size_t(0) - size_t(control & 1U);
+     for (size_t word = 0; word < words_per_row; ++word)
+@@ -217,8 +219,8 @@ bool IsBalancedPowerOfTwo(size_t n, size_t n_left, size_t n_right)
+          n_left == n / 2 && n_right == n / 2;
+ }
+ 
+-size_t WriteLevelOrderControls(const std::vector<uint8_t> &source,
+-                               std::vector<uint8_t> *destination,
++size_t WriteLevelOrderControls(const PackedControls &source,
++                               PackedControls *destination,
+                                size_t n,
+                                size_t root_half,
+                                size_t depth,
+@@ -282,9 +284,9 @@ size_t BuildPostOrderControlStarts(size_t length,
+ // Emit the contiguous-block postorder directly from the DFS tape. The public
+ // gate geometry determines every source position, so no level-order tape is
+ // materialized.
+-size_t WritePostOrderFromDfs(const uint8_t *source,
++size_t WritePostOrderFromDfs(PackedControlView source,
+                              const std::vector<size_t> &starts,
+-                             std::vector<uint8_t> *destination,
++                             PackedControls *destination,
+                              size_t base,
+                              size_t length,
+                              size_t position)
+@@ -316,12 +318,12 @@ struct GenericGate
+ 
+ template <typename Gate>
+ void ApplyLevelOrderedGates(unsigned char *data,
+-                            const uint8_t *controls,
++                            PackedControlView controls,
+                             size_t n,
+                             size_t block_size,
+                             const Gate &apply_gate)
+ {
+-  size_t position = 0;
++  PackedControlCursor cursor(controls);
+   for (size_t stride = 1; stride < n; stride *= 2)
+   {
+     for (size_t base = 0; base < n; base += stride * 2)
+@@ -330,7 +332,7 @@ void ApplyLevelOrderedGates(unsigned char *data,
+       unsigned char *second = first + stride * block_size;
+       for (size_t offset = 0; offset < stride; ++offset)
+       {
+-        apply_gate(first, second, block_size, controls[position++]);
++        apply_gate(first, second, block_size, cursor.next());
+         first += block_size;
+         second += block_size;
+       }
+@@ -340,7 +342,7 @@ void ApplyLevelOrderedGates(unsigned char *data,
+ 
+ template <typename Gate>
+ size_t ApplyPostOrderGates(unsigned char *data,
+-                           const uint8_t *controls,
++                           PackedControlCursor &cursor,
+                            size_t n,
+                            size_t block_size,
+                            size_t position,
+@@ -349,32 +351,32 @@ size_t ApplyPostOrderGates(unsigned char *data,
+   const size_t half = n / 2;
+   if (n > 2)
+   {
+-    position = ApplyPostOrderGates(data, controls, half, block_size,
++    position = ApplyPostOrderGates(data, cursor, half, block_size,
+                                    position, apply_gate);
+-    position = ApplyPostOrderGates(data + half * block_size, controls,
++    position = ApplyPostOrderGates(data + half * block_size, cursor,
+                                    half, block_size, position, apply_gate);
+   }
+   unsigned char *first = data;
+   unsigned char *second = data + half * block_size;
+   for (size_t i = 0; i < half; ++i)
+   {
+-    apply_gate(first, second, block_size, controls[position++]);
++    apply_gate(first, second, block_size, cursor.next());
+     first += block_size;
+     second += block_size;
+   }
+-  return position;
++  return cursor.position();
+ }
+ 
+ #ifndef BEFTS_MODE
+ // Keep the hot loop equivalent to the original OFork implementation: choose
+-// the assembly specialization once and read controls through a raw pointer.
++// the assembly specialization once and decode the packed tape sequentially.
+ template <OFork_Style style>
+ void ApplyLevelOrderedWithStyle(unsigned char *data,
+-                                const uint8_t *controls,
++                                PackedControlView controls,
+                                 size_t n,
+                                 size_t block_size)
+ {
+-  size_t position = 0;
++  PackedControlCursor cursor(controls);
+   for (size_t stride = 1; stride < n; stride <<= 1U)
+   {
+     for (size_t base = 0; base < n; base += stride * 2)
+@@ -383,7 +385,7 @@ void ApplyLevelOrderedWithStyle(unsigned char *data,
+       unsigned char *second = first + stride * block_size;
+       for (size_t offset = 0; offset < stride; ++offset)
+       {
+-        const uint8_t control = controls[position++];
++        const uint8_t control = cursor.next();
+         const uint8_t left_flag = static_cast<uint8_t>((control >> 1U) & 1U);
+         const uint8_t right_flag = static_cast<uint8_t>(control & 1U);
+         ofork_buffer<style>(first,
+@@ -560,14 +562,29 @@ uint8_t GateControlForBalancedPair(uint8_t x, uint8_t y,
+   return static_cast<uint8_t>((top_from_y << 1U) | bottom_from_y);
+ }
+ 
+-template <bool PostOrder>
+-size_t OFRBalanceLayer(uint8_t *tags, std::vector<uint8_t> &controls,
++inline void RouteMembershipGate(size_t *first, size_t *second,
++                                 size_t words_per_row, uint8_t control)
++{
++  const size_t top_mask = size_t(0) - size_t((control >> 1U) & 1U);
++  const size_t bottom_mask = size_t(0) - size_t(control & 1U);
++  for (size_t word = 0; word < words_per_row; ++word)
++  {
++    const size_t x = first[word];
++    const size_t y = second[word];
++    first[word] = (x & ~top_mask) | (y & top_mask);
++    second[word] = (x & ~bottom_mask) | (y & bottom_mask);
++  }
++}
++
++template <bool PostOrder, bool RouteWords = false>
++size_t OFRBalanceLayer(uint8_t *tags, PackedControls &controls,
+                        uint8_t *scratch, const size_t *postorder_starts,
+                        size_t root_n, size_t base, size_t stride, size_t n,
+-                       size_t n_left, size_t n_right, size_t position)
++                       size_t n_left, size_t n_right, size_t position,
++                       size_t *rows = NULL, size_t words_per_row = 0)
+ {
+   const size_t gate_count = n / 2;
+-  uint8_t *features = PostOrder ? scratch : controls.data() + position;
++  uint8_t *features = scratch;
+   const size_t node_base = PostOrder ? root_n / (2 * stride) : 0;
+ 
+   size_t diagonal_count = 0, fixed_left_count = 0;
+@@ -580,8 +597,8 @@ size_t OFRBalanceLayer(uint8_t *tags, std::vector<uint8_t> &controls,
+     diagonal_count += (pair >> 4U) & 1U;
+     fixed_left_count += (pair >> 1U) & 1U;
+     fixed_right_count += pair & 1U;
+-    // The DFS path reuses its destination bytes; direct postorder generation
+-    // reuses one scratch layer shared by all recursive views.
++    // Five-bit classification features are scratch, separate from the
++    // two-bit output tape; all recursive layers reuse this root allocation.
+     features[gate] = pair;
+   }
+ 
+@@ -674,7 +691,11 @@ size_t OFRBalanceLayer(uint8_t *tags, std::vector<uint8_t> &controls,
+     if (PostOrder)
+       controls[postorder_starts[node_base + gate] + base] = control;
+     else
+-      features[gate] = control;
++      controls[position + gate] = control;
++    if (RouteWords)
++      RouteMembershipGate(rows + first * words_per_row,
++                           rows + (first + stride) * words_per_row,
++                           words_per_row, control);
+     tags[first] = top_tag;
+     tags[first + stride] = bottom_tag;
+     rank_diagonal += diagonal_type;
+@@ -685,16 +706,48 @@ size_t OFRBalanceLayer(uint8_t *tags, std::vector<uint8_t> &controls,
+   return position + gate_count;
+ }
+ 
+-size_t OFRBalanceInPlaceImpl(uint8_t *tags, std::vector<uint8_t> &controls,
++size_t OFRBalanceInPlaceImpl(uint8_t *tags, PackedControls &controls, uint8_t *scratch,
+                              size_t base, size_t stride, size_t n,
+                              size_t n_left, size_t n_right, size_t position)
+ {
+-  return OFRBalanceLayer<false>(tags, controls, NULL, NULL, 0,
++  return OFRBalanceLayer<false>(tags, controls, scratch, NULL, 0,
+                                 base, stride, n, n_left, n_right, position);
+ }
+ 
++size_t OFRControlWriteAndRouteImpl(
++    uint8_t *tags, PackedControls &controls, uint8_t *scratch,
++    size_t *rows, size_t words_per_row,
++    size_t base, size_t stride, size_t n,
++    size_t n_left, size_t n_right, size_t position)
++{
++  if (n_left == 0 || n_right == 0)
++    return position;
++  if (n == 2)
++  {
++    const uint8_t control = static_cast<uint8_t>(OFR_TAG_BOTH ^ tags[base]);
++    controls[position] = control;
++    RouteMembershipGate(rows + base * words_per_row,
++                         rows + (base + stride) * words_per_row,
++                         words_per_row, control);
++    tags[base] = OFR_TAG_LEFT;
++    tags[base + stride] = OFR_TAG_RIGHT;
++    return position + 1;
++  }
++
++  position = OFRBalanceLayer<false, true>(
++      tags, controls, scratch, NULL, 0, base, stride, n,
++      n_left, n_right, position, rows, words_per_row);
++  const CapacitySplit split = SplitCapacities(n, n_left, n_right);
++  position = OFRControlWriteAndRouteImpl(
++      tags, controls, scratch, rows, words_per_row, base, stride * 2,
++      split.n_top, split.top_left, split.top_right, position);
++  return OFRControlWriteAndRouteImpl(
++      tags, controls, scratch, rows, words_per_row, base + stride, stride * 2,
++      split.n_bottom, split.bottom_left, split.bottom_right, position);
++}
++
+ void OFRControlPostOrderImpl(uint8_t *tags,
+-                             std::vector<uint8_t> &controls,
++                             PackedControls &controls,
+                              uint8_t *scratch,
+                              const size_t *postorder_starts,
+                              size_t root_n,
+@@ -749,7 +802,8 @@ OFRBalanceResult OFRBalance(const std::vector<uint8_t> &tags,
+   std::vector<uint8_t> work(tags);
+   OFRBalanceResult result;
+   result.controls.resize(n / 2);
+-  OFRBalanceInPlaceImpl(work.data(), result.controls, 0, 1, n,
++  std::vector<uint8_t> scratch(n / 2);
++  OFRBalanceInPlaceImpl(work.data(), result.controls, scratch.data(), 0, 1, n,
+                         n_left, n_right, 0);
+   result.top_tags.reserve(n / 2 + n % 2);
+   result.bottom_tags.reserve(n / 2);
+@@ -759,7 +813,7 @@ OFRBalanceResult OFRBalance(const std::vector<uint8_t> &tags,
+ }
+ 
+ size_t OFRBalanceInPlace(std::vector<uint8_t> &tags,
+-                         std::vector<uint8_t> &controls,
++                         PackedControls &controls,
+                          size_t base, size_t stride, size_t n,
+                          size_t n_left, size_t n_right, size_t position)
+ {
+@@ -769,7 +823,8 @@ size_t OFRBalanceInPlace(std::vector<uint8_t> &tags,
+   const size_t required = n / 2;
+   if (position > controls.size() || required > controls.size() - position)
+     throw std::length_error("OFR balance exceeds control array");
+-  return OFRBalanceInPlaceImpl(tags.data(), controls, base, stride, n,
++  std::vector<uint8_t> scratch(n / 2);
++  return OFRBalanceInPlaceImpl(tags.data(), controls, scratch.data(), base, stride, n,
+                                n_left, n_right, position);
+ }
+ 
+@@ -780,7 +835,7 @@ size_t OFRControlCount(size_t n, size_t n_left, size_t n_right)
+ }
+ 
+ size_t OFRControlWrite(const std::vector<uint8_t> &tags,
+-                       std::vector<uint8_t> &controls,
++                       PackedControls &controls,
+                        size_t n,
+                        size_t n_left,
+                        size_t n_right,
+@@ -791,12 +846,13 @@ size_t OFRControlWrite(const std::vector<uint8_t> &tags,
+   if (position > controls.size() || required > controls.size() - position)
+     throw std::length_error("OFR control write exceeds destination array");
+   std::vector<uint8_t> work(tags);
++  std::vector<uint8_t> scratch(n / 2);
+   return OFRControlWriteImpl(
+-      work.data(), controls, 0, 1, n, n_left, n_right, position);
++      work.data(), controls, scratch.data(), 0, 1, n, n_left, n_right, position);
+ }
+ 
+ size_t OFRControlWrite(std::vector<uint8_t> &tags,
+-                       std::vector<uint8_t> &controls,
++                       PackedControls &controls,
+                        size_t base, size_t stride, size_t n,
+                        size_t n_left, size_t n_right, size_t position)
+ {
+@@ -804,12 +860,13 @@ size_t OFRControlWrite(std::vector<uint8_t> &tags,
+   const size_t required = OFRControlCountImpl(n, n_left, n_right);
+   if (position > controls.size() || required > controls.size() - position)
+     throw std::length_error("OFR control write exceeds destination array");
+-  return OFRControlWriteImpl(tags.data(), controls, base, stride, n,
++  std::vector<uint8_t> scratch(n / 2);
++  return OFRControlWriteImpl(tags.data(), controls, scratch.data(), base, stride, n,
+                              n_left, n_right, position);
+ }
+ 
+ size_t OFRControlWrite(std::vector<uint8_t> &tags,
+-                       std::vector<uint8_t> &controls,
++                       PackedControls &controls,
+                        size_t n, size_t n_left, size_t n_right,
+                        size_t position)
+ {
+@@ -817,23 +874,45 @@ size_t OFRControlWrite(std::vector<uint8_t> &tags,
+                          n_left, n_right, position);
+ }
+ 
+-std::vector<uint8_t> OFRControl(const std::vector<uint8_t> &tags,
++size_t OFRControlWriteAndRoute(std::vector<uint8_t> &tags,
++                               PackedControls &controls,
++                               size_t *rows, size_t words_per_row,
++                               size_t n, size_t n_left, size_t n_right,
++                               size_t position)
++{
++  ValidateTagView(tags, 0, 1, n, n_left, n_right);
++  size_t row_words = 0;
++  if (rows == NULL || words_per_row == 0 ||
++      MulOverflowSize(n, words_per_row, &row_words))
++    throw std::invalid_argument("Invalid OFR membership dimensions");
++  (void)row_words;
++  const size_t required = OFRControlCountImpl(n, n_left, n_right);
++  if (position > controls.size() || required > controls.size() - position)
++    throw std::length_error("OFR control write exceeds destination array");
++  std::vector<uint8_t> scratch(n / 2);
++  return OFRControlWriteAndRouteImpl(
++      tags.data(), controls, scratch.data(), rows, words_per_row,
++      0, 1, n, n_left, n_right, position);
++}
++
++PackedControls OFRControl(const std::vector<uint8_t> &tags,
+                                 size_t n,
+                                 size_t n_left,
+                                 size_t n_right)
+ {
+   std::vector<uint8_t> normalized = OFRNormalize(
+       tags, n, n_left, n_right);
+-  std::vector<uint8_t> controls(
++  PackedControls controls(
+       OFRControlCountImpl(n, n_left, n_right));
++  std::vector<uint8_t> scratch(n / 2);
+   const size_t next = OFRControlWriteImpl(
+-      normalized.data(), controls, 0, 1, n, n_left, n_right, 0);
++      normalized.data(), controls, scratch.data(), 0, 1, n, n_left, n_right, 0);
+   if (next != controls.size())
+     throw std::logic_error("OFR control write/count mismatch");
+   return controls;
+ }
+ 
+-std::vector<uint8_t> OFRControlPostOrder(const std::vector<uint8_t> &tags,
++PackedControls OFRControlPostOrder(const std::vector<uint8_t> &tags,
+                                          size_t n,
+                                          size_t n_left,
+                                          size_t n_right)
+@@ -854,15 +933,15 @@ std::vector<uint8_t> OFRControlPostOrder(const std::vector<uint8_t> &tags,
+   std::vector<size_t> starts(n);
+   if (BuildPostOrderControlStarts(n, 1, 0, &starts) != required)
+     throw std::logic_error("OFR postorder control layout mismatch");
+-  std::vector<uint8_t> controls(required);
++  PackedControls controls(required);
+   std::vector<uint8_t> scratch(n / 2);
+   OFRControlPostOrderImpl(normalized.data(), controls, scratch.data(),
+                           starts.data(), n, 0, 1, n);
+   return controls;
+ }
+ 
+-std::vector<uint8_t> OFRLevelOrderControls(
+-    const std::vector<uint8_t> &controls,
++PackedControls OFRLevelOrderControls(
++    const PackedControls &controls,
+     size_t n,
+     size_t n_left,
+     size_t n_right)
+@@ -874,7 +953,7 @@ std::vector<uint8_t> OFRLevelOrderControls(
+   if (controls.size() != required)
+     throw std::length_error("OFR control array length mismatch");
+ 
+-  std::vector<uint8_t> level_controls(required);
++  PackedControls level_controls(required);
+   const size_t next = WriteLevelOrderControls(
+       controls, &level_controls, n, n / 2, 0, 1, 0, 0);
+   if (next != required)
+@@ -882,31 +961,31 @@ std::vector<uint8_t> OFRLevelOrderControls(
+   return level_controls;
+ }
+ 
+-std::vector<uint8_t> OFRPostOrderControls(
+-    const std::vector<uint8_t> &controls,
++PackedControls OFRPostOrderControls(
++    const PackedControls &controls,
+     size_t n,
+     size_t n_left,
+     size_t n_right)
+ {
+-  return OFRPostOrderControls(controls.data(), controls.size(),
++  return OFRPostOrderControls(controls.view(),
+                               n, n_left, n_right);
+ }
+ 
+-std::vector<uint8_t> OFRPostOrderControls(
+-    const uint8_t *controls, size_t control_count,
++PackedControls OFRPostOrderControls(
++    PackedControlView controls,
+     size_t n, size_t n_left, size_t n_right)
+ {
+   ValidateCapacities(n, n_left, n_right);
+   if (!IsBalancedPowerOfTwo(n, n_left, n_right))
+     throw std::invalid_argument("Postorder OFR requires balanced power-of-two capacities");
+   const size_t required = OFRControlCountImpl(n, n_left, n_right);
+-  if (controls == NULL || control_count != required)
++  if (controls.size() != required)
+     throw std::length_error("OFR control array length mismatch");
+ 
+   std::vector<size_t> starts(n);
+   if (BuildDfsControlStarts(n, 1, 0, 0, &starts) != required)
+     throw std::logic_error("OFR DFS control layout mismatch");
+-  std::vector<uint8_t> postorder_controls(required);
++  PackedControls postorder_controls(required);
+   const size_t next = WritePostOrderFromDfs(
+       controls, starts, &postorder_controls, 0, n, 0);
+   if (next != postorder_controls.size())
+@@ -915,7 +994,7 @@ std::vector<uint8_t> OFRPostOrderControls(
+ }
+ 
+ void OFRApplyInPlace(unsigned char *data,
+-                     const std::vector<uint8_t> &controls,
++                     const PackedControls &controls,
+                      size_t n,
+                      size_t n_left,
+                      size_t n_right,
+@@ -929,19 +1008,18 @@ void OFRApplyInPlace(unsigned char *data,
+ }
+ 
+ void OFRApplyPreparedInPlace(unsigned char *data,
+-                             const std::vector<uint8_t> &controls,
++                             const PackedControls &controls,
+                              size_t n,
+                              size_t n_left,
+                              size_t n_right,
+                              size_t block_size)
+ {
+-  OFRApplyPreparedInPlace(data, controls.data(), controls.size(),
++  OFRApplyPreparedInPlace(data, controls.view(),
+                           n, n_left, n_right, block_size);
+ }
+ 
+ void OFRApplyPreparedInPlace(unsigned char *data,
+-                             const uint8_t *controls,
+-                             size_t control_count,
++                             PackedControlView controls,
+                              size_t n,
+                              size_t n_left,
+                              size_t n_right,
+@@ -955,22 +1033,20 @@ void OFRApplyPreparedInPlace(unsigned char *data,
+   (void)data_bytes;
+   if (n_left == 0 || n_right == 0)
+   {
+-    if (control_count != 0)
++    if (controls.size() != 0)
+       throw std::logic_error("OFR control consumption mismatch");
+     return;
+   }
+-  if (controls == NULL)
+-    throw std::invalid_argument("Invalid OFR data dimensions");
+ 
+   const size_t next = OFRApplyStrided(
+       data, controls, n, n_left, n_right, block_size, 1, 0);
+-  if (next != control_count)
++  if (next != controls.size())
+     throw std::logic_error("OFR control consumption mismatch");
+ }
+ 
+ void OFRApplyLevelOrderedInPlace(
+     unsigned char *data,
+-    const std::vector<uint8_t> &level_controls,
++    const PackedControls &level_controls,
+     size_t n,
+     size_t n_left,
+     size_t n_right,
+@@ -986,7 +1062,7 @@ void OFRApplyLevelOrderedInPlace(
+ 
+ void OFRApplyPreparedLevelOrderedInPlace(
+     unsigned char *data,
+-    const std::vector<uint8_t> &level_controls,
++    const PackedControls &level_controls,
+     size_t n,
+     size_t n_left,
+     size_t n_right,
+@@ -1003,35 +1079,35 @@ void OFRApplyPreparedLevelOrderedInPlace(
+ #ifndef BEFTS_MODE
+   if (block_size == 4)
+     ApplyLevelOrderedWithStyle<OFORK_4>(
+-        data, level_controls.data(), n, block_size);
++        data, level_controls.view(), n, block_size);
+   else if (block_size == 8)
+     ApplyLevelOrderedWithStyle<OFORK_8>(
+-        data, level_controls.data(), n, block_size);
++        data, level_controls.view(), n, block_size);
+   else if (block_size == 12)
+     ApplyLevelOrderedWithStyle<OFORK_12>(
+-        data, level_controls.data(), n, block_size);
++        data, level_controls.view(), n, block_size);
+   else if (block_size == 16)
+     ApplyLevelOrderedWithStyle<OFORK_16>(
+-        data, level_controls.data(), n, block_size);
++        data, level_controls.view(), n, block_size);
+   else if (block_size == 24)
+     ApplyLevelOrderedWithStyle<OFORK_24>(
+-        data, level_controls.data(), n, block_size);
++        data, level_controls.view(), n, block_size);
+   else if (block_size >= 16 && block_size % 16 == 0)
+     ApplyLevelOrderedWithStyle<OFORK_16X>(
+-        data, level_controls.data(), n, block_size);
++        data, level_controls.view(), n, block_size);
+   else if (block_size >= 24 && block_size % 16 == 8)
+     ApplyLevelOrderedWithStyle<OFORK_8_16X>(
+-        data, level_controls.data(), n, block_size);
++        data, level_controls.view(), n, block_size);
+   else
+ #endif
+-    ApplyLevelOrderedGates(data, level_controls.data(), n, block_size,
++    ApplyLevelOrderedGates(data, level_controls.view(), n, block_size,
+                            GenericGate());
+ 
+ }
+ 
+ void OFRApplyPostOrderInPlace(
+     unsigned char *data,
+-    const std::vector<uint8_t> &postorder_controls,
++    const PackedControls &postorder_controls,
+     size_t n,
+     size_t n_left,
+     size_t n_right,
+@@ -1047,31 +1123,30 @@ void OFRApplyPostOrderInPlace(
+ 
+ void OFRApplyPreparedPostOrderInPlace(
+     unsigned char *data,
+-    const std::vector<uint8_t> &postorder_controls,
++    const PackedControls &postorder_controls,
+     size_t n,
+     size_t n_left,
+     size_t n_right,
+     size_t block_size)
+ {
+   OFRApplyPreparedPostOrderInPlace(
+-      data, postorder_controls.data(), postorder_controls.size(),
++      data, postorder_controls.view(),
+       n, n_left, n_right, block_size);
+ }
+ 
+ void OFRApplyPreparedPostOrderInPlace(
+-    unsigned char *data, const uint8_t *postorder_controls,
+-    size_t control_count, size_t n, size_t n_left, size_t n_right,
++    unsigned char *data, PackedControlView postorder_controls, size_t n, size_t n_left, size_t n_right,
+     size_t block_size)
+ {
+   ValidateCapacities(n, n_left, n_right);
+   size_t data_bytes = 0;
+   if (!IsBalancedPowerOfTwo(n, n_left, n_right) ||
+-      data == NULL || postorder_controls == NULL || block_size == 0 ||
++      data == NULL || block_size == 0 ||
+       MulOverflowSize(n, block_size, &data_bytes))
+     throw std::invalid_argument("Invalid postorder OFR dimensions");
+   (void)data_bytes;
+ 
+-  const uint8_t *control_data = postorder_controls;
++  PackedControlCursor control_data(postorder_controls);
+   size_t next = 0;
+ #ifndef BEFTS_MODE
+   if (block_size == 4)
+@@ -1102,13 +1177,13 @@ void OFRApplyPreparedPostOrderInPlace(
+     next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
+                                GenericGate());
+ 
+-  if (next != control_count)
++  if (next != postorder_controls.size())
+     throw std::logic_error("OFR postorder control consumption mismatch");
+ }
+ 
+ void OFRApplyWordsInPlace(
+     size_t *rows, size_t words_per_row,
+-    const std::vector<uint8_t> &controls, size_t position,
++    const PackedControls &controls, size_t position,
+     size_t n, size_t n_left, size_t n_right)
+ {
+   ValidateCapacities(n, n_left, n_right);
+@@ -1120,21 +1195,16 @@ void OFRApplyWordsInPlace(
+   const size_t required = OFRControlCountImpl(n, n_left, n_right);
+   if (position > controls.size() || required > controls.size() - position)
+     throw std::length_error("OFR membership replay exceeds control tape");
+-  uint8_t invalid = 0;
+-  for (size_t i = 0; i < required; ++i)
+-    invalid = static_cast<uint8_t>(invalid | (controls[position + i] >> 2U));
+-  if (invalid != 0)
+-    throw std::invalid_argument("Invalid OFR control word");
+   const size_t next = OFRApplyWordsStrided(
+       rows, words_per_row,
+-      required == 0 ? NULL : controls.data() + position,
++      controls.view(position, required),
+       n, n_left, n_right, 1, 0);
+   if (next != required)
+     throw std::logic_error("OFR membership replay count mismatch");
+ }
+ 
+ OFRControlReadResult OFRControlRead(const unsigned char *data,
+-                                    const std::vector<uint8_t> &controls,
++                                    const PackedControls &controls,
+                                     size_t n,
+                                     size_t n_left,
+                                     size_t n_right,
+@@ -1151,16 +1221,10 @@ OFRControlReadResult OFRControlRead(const unsigned char *data,
+   const size_t required = OFRControlCountImpl(n, n_left, n_right);
+   if (position > controls.size() || required > controls.size() - position)
+     throw std::length_error("OFR control read exceeds source array");
+-  uint8_t invalid_control = 0;
+-  for (size_t i = 0; i < required; ++i)
+-    invalid_control = static_cast<uint8_t>(
+-        invalid_control | (controls[position + i] >> 2U));
+-  if (invalid_control != 0)
+-    throw std::invalid_argument("Invalid OFR control word");
+ 
+   std::vector<unsigned char> work(data, data + data_bytes);
+   const size_t next = OFRApplyStrided(
+-      work.data(), required == 0 ? NULL : controls.data() + position,
++      work.data(), controls.view(position, required),
+       n, n_left, n_right, block_size, 1, 0);
+   if (next != required)
+     throw std::logic_error("OFR control consumption mismatch");
+@@ -1173,7 +1237,7 @@ OFRControlReadResult OFRControlRead(const unsigned char *data,
+ }
+ 
+ OFRDataResult OFRApply(const unsigned char *data,
+-                       const std::vector<uint8_t> &controls,
++                       const PackedControls &controls,
+                        size_t n,
+                        size_t n_left,
+                        size_t n_right,
+@@ -1199,7 +1263,7 @@ OFRDataResult OFRCompact(const unsigned char *data,
+                          size_t n_right,
+                          size_t block_size)
+ {
+-  const std::vector<uint8_t> controls = OFRControl(
++  const PackedControls controls = OFRControl(
+       tags, n, n_left, n_right);
+   return OFRApply(
+       data, controls, n, n_left, n_right, block_size);
+diff --git a/Enclave/SubSample_v2/OFR/OFR.hpp b/Enclave/SubSample_v2/OFR/OFR.hpp
+index d1f927d..87e0468 100644
+--- a/Enclave/SubSample_v2/OFR/OFR.hpp
++++ b/Enclave/SubSample_v2/OFR/OFR.hpp
+@@ -5,6 +5,7 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <vector>
++#include "PackedControls.hpp"
+ 
+ namespace ofr
+ {
+@@ -30,7 +31,7 @@ enum OFRControlWord : uint8_t
+ 
+ struct OFRBalanceResult
+ {
+-  std::vector<uint8_t> controls;
++  PackedControls controls;
+   std::vector<uint8_t> top_tags;
+   std::vector<uint8_t> bottom_tags;
+ };
+@@ -68,7 +69,7 @@ OFRBalanceResult OFRBalance(const std::vector<uint8_t> &tags,
+ 
+ // Mutate one strided tag view and write its layer controls at position.
+ size_t OFRBalanceInPlace(std::vector<uint8_t> &tags,
+-                         std::vector<uint8_t> &controls,
++                         PackedControls &controls,
+                          size_t base, size_t stride, size_t n,
+                          size_t n_left, size_t n_right, size_t position);
+ 
+@@ -76,7 +77,7 @@ size_t OFRControlCount(size_t n, size_t n_left, size_t n_right);
+ 
+ // Compatibility wrapper: copies tags before generating controls.
+ size_t OFRControlWrite(const std::vector<uint8_t> &tags,
+-                       std::vector<uint8_t> &controls,
++                       PackedControls &controls,
+                        size_t n,
+                        size_t n_left,
+                        size_t n_right,
+@@ -85,31 +86,39 @@ size_t OFRControlWrite(const std::vector<uint8_t> &tags,
+ // Preferred path: the root view is validated once; recursive views use the
+ // capacities established by Balance and do not allocate child tag arrays.
+ size_t OFRControlWrite(std::vector<uint8_t> &tags,
+-                       std::vector<uint8_t> &controls,
++                       PackedControls &controls,
+                        size_t base, size_t stride, size_t n,
+                        size_t n_left, size_t n_right, size_t position);
+ 
+ size_t OFRControlWrite(std::vector<uint8_t> &tags,
+-                       std::vector<uint8_t> &controls,
++                       PackedControls &controls,
+                        size_t n, size_t n_left, size_t n_right,
+                        size_t position);
+ 
+-std::vector<uint8_t> OFRControl(const std::vector<uint8_t> &tags,
++// Generate the same DFS tape while applying each gate to machine-word
++// membership rows. Tags must already have exact output responsibilities.
++size_t OFRControlWriteAndRoute(std::vector<uint8_t> &tags,
++                               PackedControls &controls,
++                               size_t *rows, size_t words_per_row,
++                               size_t n, size_t n_left, size_t n_right,
++                               size_t position);
++
++PackedControls OFRControl(const std::vector<uint8_t> &tags,
+                                 size_t n,
+                                 size_t n_left,
+                                 size_t n_right);
+ 
+ // Generate the prepared contiguous-block postorder tape for a balanced
+ // power-of-two network, selecting the faster public-size-dependent layout.
+-std::vector<uint8_t> OFRControlPostOrder(const std::vector<uint8_t> &tags,
++PackedControls OFRControlPostOrder(const std::vector<uint8_t> &tags,
+                                          size_t n,
+                                          size_t n_left,
+                                          size_t n_right);
+ 
+ // Reorder a balanced power-of-two control tape for the original level-order
+ // OFork network. This conversion depends only on public dimensions.
+-std::vector<uint8_t> OFRLevelOrderControls(
+-    const std::vector<uint8_t> &controls,
++PackedControls OFRLevelOrderControls(
++    const PackedControls &controls,
+     size_t n,
+     size_t n_left,
+     size_t n_right);
+@@ -117,21 +126,21 @@ std::vector<uint8_t> OFRLevelOrderControls(
+ // Offline conversion for balanced power-of-two dimensions. The resulting
+ // tape finishes each contiguous half before the gates between the halves,
+ // matching ORCompact's execution order.
+-std::vector<uint8_t> OFRPostOrderControls(
+-    const std::vector<uint8_t> &controls,
++PackedControls OFRPostOrderControls(
++    const PackedControls &controls,
+     size_t n,
+     size_t n_left,
+     size_t n_right);
+ 
+ // Convert one contiguous DFS control span without copying its source first.
+-std::vector<uint8_t> OFRPostOrderControls(
+-    const uint8_t *controls, size_t control_count,
++PackedControls OFRPostOrderControls(
++    PackedControlView controls,
+     size_t n, size_t n_left, size_t n_right);
+ 
+ // Apply controls in place. The first n_left records are the left output;
+ // the remaining n_right records are the right output.
+ void OFRApplyInPlace(unsigned char *data,
+-                     const std::vector<uint8_t> &controls,
++                     const PackedControls &controls,
+                      size_t n,
+                      size_t n_left,
+                      size_t n_right,
+@@ -139,7 +148,7 @@ void OFRApplyInPlace(unsigned char *data,
+ 
+ void OFRApplyLevelOrderedInPlace(
+     unsigned char *data,
+-    const std::vector<uint8_t> &level_controls,
++    const PackedControls &level_controls,
+     size_t n,
+     size_t n_left,
+     size_t n_right,
+@@ -148,7 +157,7 @@ void OFRApplyLevelOrderedInPlace(
+ // Apply a tape returned by OFRPostOrderControls. Balanced power-of-two only.
+ void OFRApplyPostOrderInPlace(
+     unsigned char *data,
+-    const std::vector<uint8_t> &postorder_controls,
++    const PackedControls &postorder_controls,
+     size_t n,
+     size_t n_left,
+     size_t n_right,
+@@ -158,19 +167,19 @@ void OFRApplyPostOrderInPlace(
+ // them only with controls already validated during the offline prepare phase.
+ void OFRApplyPreparedInPlace(
+     unsigned char *data,
+-    const std::vector<uint8_t> &controls,
++    const PackedControls &controls,
+     size_t n,
+     size_t n_left,
+     size_t n_right,
+     size_t block_size);
+ 
+ void OFRApplyPreparedInPlace(
+-    unsigned char *data, const uint8_t *controls, size_t control_count,
++    unsigned char *data, PackedControlView controls,
+     size_t n, size_t n_left, size_t n_right, size_t block_size);
+ 
+ void OFRApplyPreparedLevelOrderedInPlace(
+     unsigned char *data,
+-    const std::vector<uint8_t> &level_controls,
++    const PackedControls &level_controls,
+     size_t n,
+     size_t n_left,
+     size_t n_right,
+@@ -178,25 +187,24 @@ void OFRApplyPreparedLevelOrderedInPlace(
+ 
+ void OFRApplyPreparedPostOrderInPlace(
+     unsigned char *data,
+-    const std::vector<uint8_t> &postorder_controls,
++    const PackedControls &postorder_controls,
+     size_t n,
+     size_t n_left,
+     size_t n_right,
+     size_t block_size);
+ 
+ void OFRApplyPreparedPostOrderInPlace(
+-    unsigned char *data, const uint8_t *postorder_controls,
+-    size_t control_count, size_t n, size_t n_left, size_t n_right,
++    unsigned char *data, PackedControlView postorder_controls, size_t n, size_t n_left, size_t n_right,
+     size_t block_size);
+ 
+ // Replay a DFS control span on machine-word membership rows in place.
+ void OFRApplyWordsInPlace(
+     size_t *rows, size_t words_per_row,
+-    const std::vector<uint8_t> &controls, size_t position,
++    const PackedControls &controls, size_t position,
+     size_t n, size_t n_left, size_t n_right);
+ 
+ OFRControlReadResult OFRControlRead(const unsigned char *data,
+-                                    const std::vector<uint8_t> &controls,
++                                    const PackedControls &controls,
+                                     size_t n,
+                                     size_t n_left,
+                                     size_t n_right,
+@@ -204,7 +212,7 @@ OFRControlReadResult OFRControlRead(const unsigned char *data,
+                                     size_t position);
+ 
+ OFRDataResult OFRApply(const unsigned char *data,
+-                       const std::vector<uint8_t> &controls,
++                       const PackedControls &controls,
+                        size_t n,
+                        size_t n_left,
+                        size_t n_right,
+diff --git a/Enclave/SubSample_v2/OFR/OFRBenchmark.cpp b/Enclave/SubSample_v2/OFR/OFRBenchmark.cpp
+index 60dd3b9..6763996 100644
+--- a/Enclave/SubSample_v2/OFR/OFRBenchmark.cpp
++++ b/Enclave/SubSample_v2/OFR/OFRBenchmark.cpp
+@@ -12,7 +12,7 @@
+ namespace
+ {
+ 
+-std::vector<uint8_t> g_ofr_controls;
++ofr::PackedControls g_ofr_controls;
+ bool *g_ocompact_selected = NULL;
+ size_t g_ofr_n = 0;
+ size_t g_ofr_n_left = 0;
+@@ -54,7 +54,7 @@ void ReleaseBenchmarkContext()
+   g_ofr_n_left = 0;
+   g_ofr_n_right = 0;
+   g_ofr_postordered = false;
+-  std::vector<uint8_t>().swap(g_ofr_controls);
++  ofr::PackedControls().swap(g_ofr_controls);
+ }
+ 
+ } // namespace
+@@ -78,7 +78,7 @@ extern "C" int OFRCompactPrepare(uint8_t *routing_tags,
+     ocall_clock(&start_time);
+     const bool postordered = n >= 2 && (n & (n - 1)) == 0 &&
+                              n_left == n / 2 && n_right == n / 2;
+-    std::vector<uint8_t> controls = postordered
++    ofr::PackedControls controls = postordered
+         ? ofr::OFRControlPostOrder(tags, n, n_left, n_right)
+         : ofr::OFRControl(tags, n, n_left, n_right);
+     ocall_clock(&stop_time);
+diff --git a/Enclave/SubSample_v2/OFRSupple/OFRSupple.cpp b/Enclave/SubSample_v2/OFRSupple/OFRSupple.cpp
+index e6fe32e..fd6d8aa 100644
+--- a/Enclave/SubSample_v2/OFRSupple/OFRSupple.cpp
++++ b/Enclave/SubSample_v2/OFRSupple/OFRSupple.cpp
+@@ -147,6 +147,14 @@ OFRSuppleControlPositions WriteNode(
+     swo_detail::SwoMarkWorkspace right;
+     {
+       const size_t start = position.ofr_words;
++      size_t routed_words = 0;
++      if (MulOverflowSizeT(n, words, &routed_words))
++        throw std::length_error("OFRSupple membership size overflow");
++      std::vector<size_t> routed;
++      online_profile::Track(replay_ms, [&] {
++        // Retain the caller's rows; routing below is fused with gate emission.
++        routed.assign(membership, membership + routed_words);
++      });
+       {
+         std::vector<uint8_t> tags;
+         online_profile::Track(tags_ms, [&] {
+@@ -164,20 +172,11 @@ OFRSuppleControlPositions WriteNode(
+           normalized = ofr::OFRNormalize(tags, n, left_n, right_n);
+         });
+         online_profile::Track(ofr_write_ms, [&] {
+-          position.ofr_words = ofr::OFRControlWrite(
+-              normalized, controls.ofr, n, left_n, right_n, start);
++          position.ofr_words = ofr::OFRControlWriteAndRoute(
++              normalized, controls.ofr, routed.data(), words,
++              n, left_n, right_n, start);
+         });
+       }
+-
+-      size_t routed_words = 0;
+-      if (MulOverflowSizeT(n, words, &routed_words))
+-        throw std::length_error("OFRSupple membership size overflow");
+-      std::vector<size_t> routed;
+-      online_profile::Track(replay_ms, [&] {
+-        routed.assign(membership, membership + routed_words);
+-        ofr::OFRApplyWordsInPlace(
+-            routed.data(), words, controls.ofr, start, n, left_n, right_n);
+-      });
+       if (position.ofr_words - start !=
+           ofr::OFRControlCount(n, left_n, right_n))
+         throw std::logic_error("OFRSupple OFR replay offset mismatch");
+@@ -256,10 +255,9 @@ void PrepareNode(OFRSuppleControls &controls,
+                              left_n == n / 2 && right_n == n / 2;
+     if (postordered)
+     {
+-      const std::vector<uint8_t> postorder = ofr::OFRPostOrderControls(
+-          controls.ofr.data() + offset, count, n, left_n, right_n);
+-      std::copy(postorder.begin(), postorder.end(),
+-                controls.ofr.begin() + offset);
++      const ofr::PackedControls postorder = ofr::OFRPostOrderControls(
++          controls.ofr.view(offset, count), n, left_n, right_n);
++      controls.ofr.copy_from(offset, postorder.view());
+     }
+     controls.nodes.push_back({offset, shape_index, postordered, count});
+     offset += count;
+@@ -342,15 +340,14 @@ OFRSuppleReadResult ReadNode(
+       std::memcpy(work.data_ptr(), data, n * block_size);
+     });
+     online_profile::Track(route_ms, [&] {
+-      const uint8_t *tape = controls.ofr.data() + plan.offset;
++      const ofr::PackedControlView tape =
++          controls.ofr.view(plan.offset, plan.count);
+       if (plan.postordered)
+         ofr::OFRApplyPreparedPostOrderInPlace(
+-            work.data_ptr(), tape, plan.count,
+-            n, left_n, right_n, block_size);
++            work.data_ptr(), tape, n, left_n, right_n, block_size);
+       else
+         ofr::OFRApplyPreparedInPlace(
+-            work.data_ptr(), tape, plan.count,
+-            n, left_n, right_n, block_size);
++            work.data_ptr(), tape, n, left_n, right_n, block_size);
+     });
+     position.ofr_words += plan.count;
+     const OFRSuppleReadResult left = ReadNode(
+diff --git a/Enclave/SubSample_v2/OFRSupple/OFRSupple.hpp b/Enclave/SubSample_v2/OFRSupple/OFRSupple.hpp
+index 3b727c8..5a21168 100644
+--- a/Enclave/SubSample_v2/OFRSupple/OFRSupple.hpp
++++ b/Enclave/SubSample_v2/OFRSupple/OFRSupple.hpp
+@@ -10,7 +10,7 @@
+ #include <vector>
+ 
+ // Selection controls are packed into bytes; their positions count bits.
+-// OFR controls occupy one byte per two-bit word; their positions count words.
++// OFR controls occupy two bits per word; their positions count logical words.
+ struct OFRSuppleControlCounts
+ {
+   size_t swo_bits;
+@@ -26,7 +26,7 @@ struct OFRSuppleControlPositions
+ struct OFRSuppleControls
+ {
+   std::vector<uint8_t> swo;
+-  std::vector<uint8_t> ofr;
++  ofr::PackedControls ofr;
+   struct Shape
+   {
+     size_t n;
+diff --git a/run_experiments.py b/run_experiments.py
+index 1d27dd1..afe8ceb 100755
+--- a/run_experiments.py
++++ b/run_experiments.py
+@@ -161,7 +161,7 @@ def route_state_sizes(n, m, k):
+ 
+ @lru_cache(maxsize=None)
+ def ofr_control_words(n, n_left, n_right):
+-  """Mirror OFRControlCount: one byte is stored for each two-bit word."""
++  """Mirror OFRControlCount: counts logical two-bit control words."""
+   if n_left == 0 or n_right == 0:
+     return 0
+   if n == 2:
+@@ -311,14 +311,17 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=1):
+     # Prepared nodes reference the single OFR stream. Conversion needs a
+     # temporary output tape and one size_t start offset per row of the
+     # largest balanced node; both are freed before online execution.
+-    control_bytes = (swo_bits + 7) // 8 + ofr_words
++    control_bytes = (swo_bits + 7) // 8 + (ofr_words + 3) // 4
+     shape_bytes = 64 * k
+     mark_bytes = n * mask_words * SIZE_T_BYTES
+     result_bytes = m * k * block_size
+-    prepare_bytes = (n // 2) * (n.bit_length() - 1) + n * SIZE_T_BYTES
++    largest_node_words = (n // 2) * (n.bit_length() - 1)
++    prepare_bytes = (largest_node_words + 3) // 4 + n * SIZE_T_BYTES
++    # Packed control words no longer double as five-bit pair-class scratch.
++    feature_bytes = n // 2
+     # Offline routing keeps membership workspaces for active OFR ancestors.
+     offline_peak = (control_bytes + shape_bytes + mark_bytes +
+-                    8 * mark_bytes + 2 * n + prepare_bytes)
++                    8 * mark_bytes + 2 * n + feature_bytes + prepare_bytes)
+     # Online routing keeps child data and output arrays across recursion.
+     online_peak = control_bytes + shape_bytes + result_bytes + 6 * n * block_size + 2 * n
+     heap_memory += max(offline_peak, online_peak) + 64 * 1024

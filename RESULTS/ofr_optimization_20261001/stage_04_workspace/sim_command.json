@@ -1,0 +1,8 @@
+[
+  "/tmp/supple-ofr-workspace.tzotxxu6/paired_sgx_benchmark",
+  "/tmp/supple-ofr-workspace.tzotxxu6/benchmark.signed.so",
+  "--rounds",
+  "7",
+  "--warmup",
+  "2"
+]

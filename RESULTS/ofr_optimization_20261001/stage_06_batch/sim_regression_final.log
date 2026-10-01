@@ -1,0 +1,183 @@
+SGX test artifacts: /tmp/supple-memory-sgx.DbdNL0
+NASM <=  Enclave/oblivious_functions.asm
+GEN  =>  Enclave/Enclave_t.c
+CXX  <=  Enclave/MemoryProfile.cpp
+CXX  <=  Enclave/Enclave.cpp
+CC   <=  Enclave/Enclave_t.c
+CXX  <=  Enclave/utils.cpp
+CXX  <=  Enclave/ORCompaction/TightCompaction.cpp
+CXX  <=  Enclave/ORCompaction/TightCompaction_v2.cpp
+CXX  <=  Enclave/Baseline/SWO/PSQF_SWO.cpp
+CXX  <=  Enclave/ObliviousPrimitives.cpp
+CXX  <=  Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.cpp
+CXX  <=  Enclave/Baseline/Compaction_based/CompactionBasedSWO.cpp
+CXX  <=  Enclave/SubSample/SubSample.cpp
+CXX  <=  Enclave/ORShuffle/RecursiveShuffle.cpp
+CXX  <=  Enclave/SubSample_v2/SWO/helper.cpp
+CXX  <=  Enclave/SubSample_v2/OFR/helper.cpp
+CXX  <=  Enclave/SubSample_v2/SWO/SuppleSWO.cpp
+CXX  <=  Enclave/SubSample_v2/OFR/OFRBenchmark.cpp
+CXX  <=  Enclave/SubSample_v2_Par/helper.cpp
+CXX  <=  Enclave/Edger8rSyntax/Arrays.cpp
+CXX  <=  Enclave/Edger8rSyntax/Functions.cpp
+CXX  <=  Enclave/Edger8rSyntax/Pointers.cpp
+CXX  <=  Enclave/SubSample_v2_Par/SuppleSWO_parallel.cpp
+CXX  <=  Enclave/SubSample_v2/OFRSupple/OFRSupple.cpp
+CXX  <=  Enclave/Edger8rSyntax/Types.cpp
+CXX  <=  Enclave/TrustedLibrary/Libc.cpp
+CXX  <=  Enclave/TrustedLibrary/Libcxx.cpp
+CXX  <=  Enclave/TrustedLibrary/Thread.cpp
+CXX  <=  Enclave/SubSample_v2/OFR/OFR.cpp
+/usr/bin/ld: warning: memchr.o: missing .note.GNU-stack section implies executable stack
+/usr/bin/ld: NOTE: This behaviour is deprecated and will be removed in a future version of the linker
+LINK =>  enclave.so
+tcs_num 4, tcs_max_num 4, tcs_min_pool 1
+[0;32mINFO: Enclave configuration 'MiscSelect' and 'MiscSelectMask' will prevent enclave from using dynamic features. To use the dynamic features on SGX2 platform, suggest to set MiscMask[0]=0 and MiscSelect[0]=1.
+[0mThe required memory is 86278144B.
+The required memory is 0x5248000, 84256 KB.
+handle_compatible_metadata: Overwrite with metadata version 0x100000005
+Succeed.
+<EnclaveConfiguration>
+    <ProdID>0</ProdID>
+    <ISVSVN>0</ISVSVN>
+    <StackMaxSize>0x400000</StackMaxSize>
+    <HeapMaxSize>0x4000000</HeapMaxSize>
+    <TCSNum>4</TCSNum>
+    <TCSPolicy>1</TCSPolicy>
+    <DisableDebug>0</DisableDebug>
+    <MiscSelect>0</MiscSelect>
+    <MiscMask>0xFFFFFFFF</MiscMask>
+</EnclaveConfiguration>
+PASS mode=1 n=64 m=16 k=1 round=0 peak=103607
+PASS mode=1 n=64 m=16 k=1 round=1 peak=103671
+PASS mode=1 n=64 m=16 k=1 round=2 peak=103735
+PASS mode=1 n=64 m=16 k=2 round=0 peak=103991
+PASS mode=1 n=64 m=16 k=2 round=1 peak=104055
+PASS mode=1 n=64 m=16 k=2 round=2 peak=104119
+PASS mode=1 n=64 m=16 k=4 round=0 peak=104759
+PASS mode=1 n=64 m=16 k=4 round=1 peak=104823
+PASS mode=1 n=64 m=16 k=4 round=2 peak=104887
+PASS mode=1 n=64 m=16 k=8 round=0 peak=106295
+PASS mode=1 n=64 m=16 k=8 round=1 peak=106359
+PASS mode=1 n=64 m=16 k=8 round=2 peak=106423
+sgx_rijndael128GCM_decrypt failure (3001)
+PASS mode=2 n=64 m=16 k=1 round=0 peak=110111
+PASS mode=2 n=64 m=16 k=1 round=1 peak=110175
+PASS mode=2 n=64 m=16 k=1 round=2 peak=110239
+PASS mode=2 n=64 m=16 k=2 round=0 peak=110111
+PASS mode=2 n=64 m=16 k=2 round=1 peak=110175
+PASS mode=2 n=64 m=16 k=2 round=2 peak=110239
+PASS mode=2 n=64 m=16 k=4 round=0 peak=110111
+PASS mode=2 n=64 m=16 k=4 round=1 peak=110175
+PASS mode=2 n=64 m=16 k=4 round=2 peak=110239
+PASS mode=2 n=64 m=16 k=8 round=0 peak=110111
+PASS mode=2 n=64 m=16 k=8 round=1 peak=110175
+PASS mode=2 n=64 m=16 k=8 round=2 peak=110239
+PSQF_SWO: N % M != 0, falling back to single sample
+sgx_rijndael128GCM_decrypt failure (3001)
+PASS mode=3 n=64 m=16 k=1 round=0 peak=103543
+PASS mode=3 n=64 m=16 k=1 round=1 peak=103543
+PASS mode=3 n=64 m=16 k=1 round=2 peak=103543
+PASS mode=3 n=64 m=16 k=2 round=0 peak=103927
+PASS mode=3 n=64 m=16 k=2 round=1 peak=103927
+PASS mode=3 n=64 m=16 k=2 round=2 peak=103927
+PASS mode=3 n=64 m=16 k=4 round=0 peak=104695
+PASS mode=3 n=64 m=16 k=4 round=1 peak=104695
+PASS mode=3 n=64 m=16 k=4 round=2 peak=104695
+PASS mode=3 n=64 m=16 k=8 round=0 peak=106231
+PASS mode=3 n=64 m=16 k=8 round=1 peak=106231
+PASS mode=3 n=64 m=16 k=8 round=2 peak=106231
+sgx_rijndael128GCM_decrypt failure (3001)
+PASS mode=4 n=64 m=16 k=1 round=0 peak=104164
+PASS mode=4 n=64 m=16 k=1 round=1 peak=104228
+PASS mode=4 n=64 m=16 k=1 round=2 peak=104292
+PASS mode=4 n=64 m=16 k=2 round=0 peak=104572
+PASS mode=4 n=64 m=16 k=2 round=1 peak=104636
+PASS mode=4 n=64 m=16 k=2 round=2 peak=104700
+PASS mode=4 n=64 m=16 k=4 round=0 peak=106148
+PASS mode=4 n=64 m=16 k=4 round=1 peak=106212
+PASS mode=4 n=64 m=16 k=4 round=2 peak=106276
+PASS mode=4 n=64 m=16 k=8 round=0 peak=109340
+PASS mode=4 n=64 m=16 k=8 round=1 peak=109404
+PASS mode=4 n=64 m=16 k=8 round=2 peak=109468
+sgx_rijndael128GCM_decrypt failure (3001)
+PASS mode=5 n=64 m=16 k=1 round=0 peak=104188
+PASS mode=5 n=64 m=16 k=1 round=1 peak=104252
+PASS mode=5 n=64 m=16 k=1 round=2 peak=104316
+PASS mode=5 n=64 m=16 k=2 round=0 peak=104620
+PASS mode=5 n=64 m=16 k=2 round=1 peak=104684
+PASS mode=5 n=64 m=16 k=2 round=2 peak=104748
+PASS mode=5 n=64 m=16 k=4 round=0 peak=106136
+PASS mode=5 n=64 m=16 k=4 round=1 peak=106136
+PASS mode=5 n=64 m=16 k=4 round=2 peak=106136
+PASS mode=5 n=64 m=16 k=8 round=0 peak=109512
+PASS mode=5 n=64 m=16 k=8 round=1 peak=109512
+PASS mode=5 n=64 m=16 k=8 round=2 peak=109512
+sgx_rijndael128GCM_decrypt failure (3001)
+PASS: compaction dispatch widths, edge dimensions and allocation failure
+Running experiment: mode = 1 (ShuffleBasedSWO), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 1.28 MB
+Measured algorithm heap peak: 104183 bytes (0.099357 MiB)
+Out_lines: ('0.230000', '0.018000', '0.000000', '0.018000', 1344)
+
+Running experiment: mode = 2 (PSQF_SWO), b = 24, p = 0.2500, n = 64, m = 16, k = 4, heap_est = 1.11 MB
+Measured algorithm heap peak: 110303 bytes (0.105193 MiB)
+Out_lines: ('0.990000', '0.832500', 1344)
+
+Running experiment: mode = 3 (CompactionBasedSWO), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 1.28 MB
+Measured algorithm heap peak: 103927 bytes (0.099113 MiB)
+Out_lines: ('0.241000', '0.009500', '0.006500', '0.003000', 384)
+
+Running experiment: mode = 4 (Supple), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 1.29 MB
+Measured algorithm heap peak: 104764 bytes (0.099911 MiB)
+Out_lines: ('0.228500', '0.012500', '0.009500', '0.003000', 384)
+
+Running experiment: mode = 5 (OFRSupple), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 1.38 MB
+Measured algorithm heap peak: 104812 bytes (0.099957 MiB)
+Out_lines: ('0.229000', '0.014000', '0.010000', '0.004000', 384)
+
+Running experiment: mode = 1 (ShuffleBasedSWO), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 1.28 MB
+Measured algorithm heap peak: 104183 bytes (0.099357 MiB)
+Out_lines: ('0.240500', '0.018000', '0.000000', '0.018000', 1344)
+
+Backed up legacy heap estimates: /tmp/supple-memory-csv-i7cbg53_/results/ShuffleBasedSWO.heap_est_backup.csv
+Running experiment: mode = 2 (PSQF_SWO), b = 24, p = 0.2500, n = 64, m = 16, k = 4, heap_est = 1.11 MB
+Measured algorithm heap peak: 110303 bytes (0.105193 MiB)
+Out_lines: ('0.973000', '0.822500', 1344)
+
+Backed up legacy heap estimates: /tmp/supple-memory-csv-i7cbg53_/results/PSQF_SWO.heap_est_backup.csv
+Running experiment: mode = 3 (CompactionBasedSWO), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 1.28 MB
+Measured algorithm heap peak: 103927 bytes (0.099113 MiB)
+Out_lines: ('0.238000', '0.010000', '0.006500', '0.003500', 384)
+
+Backed up legacy heap estimates: /tmp/supple-memory-csv-i7cbg53_/results/CompactionBasedSWO.heap_est_backup.csv
+Running experiment: mode = 4 (Supple), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 1.29 MB
+Measured algorithm heap peak: 104764 bytes (0.099911 MiB)
+Out_lines: ('0.225500', '0.013000', '0.009500', '0.003500', 384)
+
+Backed up legacy heap estimates: /tmp/supple-memory-csv-i7cbg53_/results/Supple.heap_est_backup.csv
+Running experiment: mode = 5 (OFRSupple), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 1.38 MB
+Measured algorithm heap peak: 104812 bytes (0.099957 MiB)
+Out_lines: ('0.232500', '0.013500', '0.010000', '0.003500', 384)
+
+Backed up legacy heap estimates: /tmp/supple-memory-csv-i7cbg53_/results/OFRSupple.heap_est_backup.csv
+Running experiment: mode = 1 (ShuffleBasedSWO), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 1.28 MB
+Measured algorithm heap peak: 104183 bytes (0.099357 MiB)
+Out_lines: ('0.238500', '0.019000', '0.000000', '0.019000', 1344)
+
+Running experiment: mode = 2 (PSQF_SWO), b = 24, p = 0.2500, n = 64, m = 16, k = 4, heap_est = 1.11 MB
+Measured algorithm heap peak: 110303 bytes (0.105193 MiB)
+Out_lines: ('0.967500', '0.826500', 1344)
+
+Running experiment: mode = 3 (CompactionBasedSWO), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 1.28 MB
+Measured algorithm heap peak: 103927 bytes (0.099113 MiB)
+Out_lines: ('0.220500', '0.010000', '0.006500', '0.003500', 384)
+
+Running experiment: mode = 4 (Supple), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 1.29 MB
+Measured algorithm heap peak: 104764 bytes (0.099911 MiB)
+Out_lines: ('0.234000', '0.012500', '0.009500', '0.003000', 384)
+
+Running experiment: mode = 5 (OFRSupple), b = 24, p = 0.2500, n = 64, m = 16, k = 2, heap_est = 1.38 MB
+Measured algorithm heap peak: 104812 bytes (0.099957 MiB)
+Out_lines: ('0.236000', '0.013000', '0.009500', '0.003500', 384)
+
+PASS: real application, measured CSVs, legacy backups and offline-profile compatibility

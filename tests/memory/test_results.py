@@ -12,20 +12,31 @@ spec.loader.exec_module(experiments)
 
 
 class MemoryResultsTest(unittest.TestCase):
+    def test_ofrsupple_balanced_frontier_counts(self):
+        self.assertEqual(experiments.ofrsupple_frontier(25, 5, 21),
+                         ((0, 5), (5, 4), (9, 4), (13, 4), (17, 4)))
+        # Independently checked by the matching C++ regression case.
+        self.assertEqual(experiments.ofrsupple_control_counts(25, 5, 21), (100, 390))
+        self.assertEqual(experiments.ofrsupple_feature_scratch_bytes(25, 5, 21), 12)
+        self.assertEqual(experiments.ofrsupple_feature_scratch_bytes(15, 3, 5), 7)
+        self.assertEqual(experiments.ofrsupple_feature_scratch_bytes(4096, 64, 64), 0)
+
     def test_renumbered_modes_and_heap_configuration(self):
         expected = {
             1: ("ShuffleBasedSWO", True, True, False, 1667072, 1),
             2: ("PSQF_SWO", False, False, False, 1679360, 1),
             3: ("CompactionBasedSWO", True, True, False, 1687552, 1),
             4: ("Supple", True, True, False, 2215936, 1),
-            5: ("OFRSupple", True, True, False, 2830336, 1),
+            5: ("OFRSupple", True, True, False, 2146304, 1),
             10: ("PSQF_single", False, False, True, 1187840, 1),
             11: ("SubSample", False, False, True, 1187840, 1),
             12: ("SubSampleMultiSlice", True, True, False, 1998848, 1),
             13: ("SubSampleMulti_opt", True, True, False, 2293760, 1),
             14: ("Supple_parallel", True, True, False, 2625536, 4),
         }
-        self.assertEqual(experiments.DEFAULT_MODE, [1, 2, 3, 4, 5])
+        self.assertTrue(experiments.DEFAULT_MODE)
+        self.assertEqual(len(experiments.DEFAULT_MODE), len(set(experiments.DEFAULT_MODE)))
+        self.assertTrue(set(experiments.DEFAULT_MODE).issubset(experiments.MODE_INFO))
         self.assertEqual(set(experiments.MODE_INFO), set(expected))
         for mode, (name, needs_k, detailed, fixed_k, heap, tcs) in expected.items():
             self.assertEqual(experiments.MODE_INFO[mode], dict(

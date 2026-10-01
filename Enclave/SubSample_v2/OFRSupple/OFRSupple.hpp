@@ -10,7 +10,7 @@
 #include <vector>
 
 // Selection controls are packed into bytes; their positions count bits.
-// OFR controls occupy one byte per two-bit word; their positions count words.
+// OFR controls occupy two bits per word; their positions count logical words.
 struct OFRSuppleControlCounts
 {
   size_t swo_bits;
@@ -26,7 +26,7 @@ struct OFRSuppleControlPositions
 struct OFRSuppleControls
 {
   std::vector<uint8_t> swo;
-  std::vector<uint8_t> ofr;
+  ofr::PackedControls ofr;
   struct Shape
   {
     size_t n;
@@ -40,8 +40,8 @@ struct OFRSuppleControls
     bool postordered;
     size_t count;
   };
-  // A populated nodes array means each span of ofr has been converted in
-  // place to the layout selected by that node. An empty array keeps ofr in
+  // A populated nodes array means each span of ofr was written directly in
+  // the layout selected by that node. An empty array keeps ofr in
   // the raw DFS layout used by OFRSuppleControlWrite.
   std::vector<Shape> shapes;
   std::vector<Node> nodes;

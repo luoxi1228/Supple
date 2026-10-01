@@ -1,0 +1,3 @@
+Test artifacts: /tmp/supple-ofr-test.YINg52
+PASS: 250952 exact routings, 28866 normalization/capacity cases, 38016 fused word routings, 1040 tiled postorder routings, 4 narrow-counter boundary routings, 6 membership byte-overflow rejections, arbitrary lengths, offsets, one-sided outputs, and large inputs
+PASS: 131072 production four-gate packets; 4096 mixed postorder/DFS cases; unaligned data, packed spans and sentinels

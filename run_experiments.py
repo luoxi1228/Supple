@@ -35,7 +35,7 @@ def available_cpu_count():
   return max(1, len(physical_cores))
 
 
-DEFAULT_MODE = [1, 2, 3, 4, 5]
+DEFAULT_MODE = [4,5]
 DEFAULT_P = [0.015625]
 DEFAULT_N = [1048576]
 DEFAULT_K = [64]
@@ -161,7 +161,7 @@ def route_state_sizes(n, m, k):
 
 @lru_cache(maxsize=None)
 def ofr_control_words(n, n_left, n_right):
-  """Mirror OFRControlCount: one byte is stored for each two-bit word."""
+  """Mirror OFRControlCount: counts logical two-bit control words."""
   if n_left == 0 or n_right == 0:
     return 0
   if n == 2:
@@ -177,15 +177,16 @@ def ofr_control_words(n, n_left, n_right):
 
 
 def ofrsupple_frontier(n, m, k):
-  nodes = [(0, k)]
-  v = 0
-  while v < len(nodes):
-    start, count = nodes[v]
-    if count == 1 or m * count <= n:
-      v += 1
-    else:
-      left = count // 2
-      nodes[v:v + 1] = [(start, left), (start + left, count - left)]
+  """Mirror SWOFrontier's balanced groups at most floor(n/m) samples."""
+  maximum = n // m
+  node_count = (k + maximum - 1) // maximum
+  base_count, larger_nodes = divmod(k, node_count)
+  nodes = []
+  start = 0
+  for index in range(node_count):
+    count = base_count + (index < larger_nodes)
+    nodes.append((start, count))
+    start += count
   return tuple(nodes)
 
 
@@ -217,6 +218,86 @@ def ofrsupple_control_counts(n, m, k):
     return (swo_bits, ofr_words)
 
   return count_node(n, k, frontier)
+
+
+def ofrsupple_feature_scratch_bytes(n, m, k):
+  """Largest generic DFS layer; balanced tiled nodes need no heap scratch."""
+  frontier = ofrsupple_frontier(n, m, k) if m * k > n else ()
+
+  @lru_cache(maxsize=None)
+  def scratch_node(items, samples, nodes):
+    if samples == 1:
+      return 0
+    left_k = samples // 2
+    right_k = samples - left_k
+    if items == m * samples:
+      left_n = m * left_k
+      right_n = items - left_n
+      balanced = (items >= 2 and items & (items - 1) == 0 and
+                  left_n == items // 2 and right_n == items // 2)
+      return max(0 if balanced else items // 2,
+                 scratch_node(left_n, left_k, ()),
+                 scratch_node(right_n, right_k, ()))
+    children = nodes or ((0, left_k), (left_k, right_k))
+    return max(scratch_node(min(items, m * child_k), child_k, ())
+               for _, child_k in children)
+
+  return scratch_node(n, k, frontier)
+
+
+def ofrsupple_workspace_sizes(n, m, k):
+  """Coexisting per-depth capacity maxima in the ECALL's owned-root path.
+
+  Returns offline workspace bytes, online data items, and the largest
+  compaction span. Root membership is routed in place and released before
+  online; tags, projections and generic features remain live by depth until
+  offline finishes. Exact reserve calls prevent vector capacity doubling.
+  """
+  frontier = ofrsupple_frontier(n, m, k) if m * k > n else ()
+  depths = []
+
+  def visit(items, samples, nodes, depth):
+    while len(depths) <= depth:
+      # tags, features, left rows, right rows, generic child rows, data, compact
+      depths.append([0] * 7)
+    limits = depths[depth]
+    if samples == 1 and items == m:
+      return
+    limits[5] = max(limits[5], items)
+    if samples > 1 and items == m * samples:
+      left_k = samples // 2
+      right_k = samples - left_k
+      left_n = m * left_k
+      right_n = items - left_n
+      balanced = (items >= 2 and items & (items - 1) == 0 and
+                  left_n == items // 2 and right_n == items // 2)
+      limits[0] = max(limits[0], items)
+      if not balanced:
+        limits[1] = max(limits[1], items // 2)
+      if left_k > 1:
+        limits[2] = max(limits[2], left_n * ((left_k + WORD_BITS - 1) // WORD_BITS))
+      if right_k > 1:
+        limits[3] = max(limits[3], right_n * ((right_k + WORD_BITS - 1) // WORD_BITS))
+      visit(left_n, left_k, (), depth + 1)
+      visit(right_n, right_k, (), depth + 1)
+      return
+    children = (((0, 1),) if samples == 1 else nodes or
+                ((0, samples // 2), (samples // 2, samples - samples // 2)))
+    for _, child_k in children:
+      child_n = min(items, m * child_k)
+      # Compact projects all parent rows before truncating to child_n.
+      limits[4] = max(limits[4], items * ((child_k + WORD_BITS - 1) // WORD_BITS))
+      if child_n < items:
+        limits[6] = max(limits[6], items)
+      if child_k > 1:
+        visit(child_n, child_k, (), depth + 1)
+
+  visit(n, k, frontier, 0)
+  workspace_bytes = sum(tags + features + (left + right + child) * SIZE_T_BYTES
+                        for tags, features, left, right, child, _, _ in depths)
+  data_items = sum(row[5] for row in depths)
+  compact_items = max(row[6] for row in depths)
+  return workspace_bytes, data_items, compact_items
 
 
 def subsample_multi_opt_workspace_bytes(n, m, k, block_size):
@@ -308,20 +389,22 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=1):
     k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
     mask_words = (k + WORD_BITS - 1) // WORD_BITS
     swo_bits, ofr_words = ofrsupple_control_counts(n, m, k)
-    # Prepared nodes reference the single OFR stream. Conversion needs a
-    # temporary output tape and one size_t start offset per row of the
-    # largest balanced node; both are freed before online execution.
-    control_bytes = (swo_bits + 7) // 8 + ofr_words
+    # Prepared nodes write directly into the single packed stream. Balanced
+    # tiled nodes use bounded stack state rather than heap conversion arrays.
+    control_bytes = (swo_bits + 7) // 8 + (ofr_words + 3) // 4
     shape_bytes = 64 * k
     mark_bytes = n * mask_words * SIZE_T_BYTES
     result_bytes = m * k * block_size
-    prepare_bytes = (n // 2) * (n.bit_length() - 1) + n * SIZE_T_BYTES
-    # Offline routing keeps membership workspaces for active OFR ancestors.
-    offline_peak = (control_bytes + shape_bytes + mark_bytes +
-                    8 * mark_bytes + 2 * n + prepare_bytes)
-    # Online routing keeps child data and output arrays across recursion.
-    online_peak = control_bytes + shape_bytes + result_bytes + 6 * n * block_size + 2 * n
-    heap_memory += max(offline_peak, online_peak) + 64 * 1024
+    workspace_bytes, data_items, compact_items = ofrsupple_workspace_sizes(n, m, k)
+    # Reserve all per-depth buffers simultaneously; owned membership avoids
+    # route copies. A generic Compact also uses flags and uint32_t prefixes.
+    compact_bytes = compact_items + (4 * (compact_items + 1) if compact_items else 0)
+    offline_peak = control_bytes + shape_bytes + mark_bytes + workspace_bytes + compact_bytes
+    mark_peak = mark_bytes + k * 8
+    # Offline workspace and root membership are released before output and
+    # online workspaces are allocated.
+    online_peak = control_bytes + shape_bytes + result_bytes + data_items * block_size + compact_bytes
+    heap_memory += max(offline_peak, mark_peak, online_peak) + 64 * 1024
     heap_memory = int(math.ceil(heap_memory * 1.35))
 
   elif mode in (13, 4, 14):

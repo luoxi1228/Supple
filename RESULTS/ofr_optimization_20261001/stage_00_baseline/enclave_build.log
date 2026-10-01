@@ -1,0 +1,32 @@
+NASM <=  Enclave/oblivious_functions.asm
+GEN  =>  Enclave/Enclave_t.c
+CXX  <=  Enclave/Enclave.cpp
+CC   <=  Enclave/Enclave_t.c
+CXX  <=  Enclave/MemoryProfile.cpp
+CXX  <=  Enclave/utils.cpp
+CXX  <=  Enclave/ObliviousPrimitives.cpp
+CXX  <=  Enclave/ORCompaction/TightCompaction.cpp
+CXX  <=  Enclave/ORCompaction/TightCompaction_v2.cpp
+CXX  <=  Enclave/ORShuffle/RecursiveShuffle.cpp
+CXX  <=  Enclave/Baseline/SWO/PSQF_SWO.cpp
+CXX  <=  Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.cpp
+CXX  <=  Enclave/SubSample/SubSample.cpp
+CXX  <=  Enclave/Baseline/Compaction_based/CompactionBasedSWO.cpp
+CXX  <=  Enclave/SubSample_v2/SWO/helper.cpp
+CXX  <=  Enclave/SubSample_v2/SWO/SuppleSWO.cpp
+CXX  <=  Enclave/SubSample_v2/OFR/helper.cpp
+CXX  <=  Enclave/SubSample_v2/OFR/OFRBenchmark.cpp
+CXX  <=  Enclave/SubSample_v2/OFR/OFR.cpp
+CXX  <=  Enclave/SubSample_v2/OFRSupple/OFRSupple.cpp
+CXX  <=  Enclave/SubSample_v2_Par/helper.cpp
+CXX  <=  Enclave/SubSample_v2_Par/SuppleSWO_parallel.cpp
+CXX  <=  Enclave/Edger8rSyntax/Arrays.cpp
+CXX  <=  Enclave/Edger8rSyntax/Functions.cpp
+CXX  <=  Enclave/Edger8rSyntax/Pointers.cpp
+CXX  <=  Enclave/Edger8rSyntax/Types.cpp
+CXX  <=  Enclave/TrustedLibrary/Libc.cpp
+CXX  <=  Enclave/TrustedLibrary/Libcxx.cpp
+CXX  <=  Enclave/TrustedLibrary/Thread.cpp
+/usr/bin/ld: warning: memchr.o: missing .note.GNU-stack section implies executable stack
+/usr/bin/ld: NOTE: This behaviour is deprecated and will be removed in a future version of the linker
+LINK =>  enclave.so

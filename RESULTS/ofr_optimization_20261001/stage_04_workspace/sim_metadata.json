@@ -1,0 +1,12 @@
+{
+  "stage": "workspace",
+  "backend": "sim",
+  "source": "/root/Supple",
+  "build": "/tmp/supple-ofr-workspace.tzotxxu6",
+  "source_sha256": "89a6c13b29aca59fd811abb3168e5242644f929008c7783c11e65f4f35d203ab",
+  "commit": "fb2fcac45d906eb91416291ce9705ba3d9d88140",
+  "rounds": 7,
+  "warmup": 2,
+  "host": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
+  "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+}

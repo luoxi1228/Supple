@@ -1,0 +1,5 @@
+{
+  "status": "interrupted",
+  "reason": "SIM ECALL dominated by per-record crypto; representative seven-round cases collected separately",
+  "full_native_matrix_complete": true
+}

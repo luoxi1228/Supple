@@ -1,0 +1,2 @@
+Test artifacts: /tmp/supple-ofr-test.khHxUp
+PASS: 250952 exact routings, 28866 normalization/capacity cases, 38016 fused word routings, 1040 tiled postorder routings, arbitrary lengths, offsets, one-sided outputs, and large inputs

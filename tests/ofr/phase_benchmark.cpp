@@ -73,9 +73,9 @@ int main(int argc, char **argv)
     const size_t half = n / 2;
     const std::vector<uint8_t> normalized =
         ofr::OFRNormalize(tags, n, half, half);
-    const std::vector<uint8_t> controls =
+    const ofr::PackedControls controls =
         ofr::OFRControl(tags, n, half, half);
-    const std::vector<uint8_t> postorder =
+    const ofr::PackedControls postorder =
         ofr::OFRPostOrderControls(controls, n, half, half);
     if (ofr::OFRControlPostOrder(tags, n, half, half) != postorder)
       throw std::logic_error("Prepared postorder control mismatch");
@@ -88,7 +88,7 @@ int main(int argc, char **argv)
         });
 
     std::vector<uint8_t> work_tags(n);
-    std::vector<uint8_t> work_controls(controls.size());
+    ofr::PackedControls work_controls(controls.size());
     const double control_ms = MedianMilliseconds(
         rounds, [&]() { work_tags = normalized; }, [&]() {
           const size_t end = ofr::OFRControlWrite(
@@ -98,30 +98,30 @@ int main(int argc, char **argv)
 
     const double postorder_ms = MedianMilliseconds(
         rounds, []() {}, [&]() {
-          const std::vector<uint8_t> result =
+          const ofr::PackedControls result =
               ofr::OFRPostOrderControls(controls, n, half, half);
           sink += result[result.size() / 3];
         });
 
     const double prepared_control_ms = MedianMilliseconds(
         rounds, []() {}, [&]() {
-          const std::vector<uint8_t> result =
+          const ofr::PackedControls result =
               ofr::OFRControlPostOrder(tags, n, half, half);
           sink += result[result.size() / 3];
         });
 
     const double offline_ms = MedianMilliseconds(
         rounds, []() {}, [&]() {
-          const std::vector<uint8_t> generated =
+          const ofr::PackedControls generated =
               ofr::OFRControlPostOrder(tags, n, half, half);
           sink += generated.size();
         });
 
     std::printf(
-        "n=%zu gates=%zu normalize_ms=%.3f control_ms=%.3f "
+        "n=%zu gates=%zu control_bytes=%zu normalize_ms=%.3f control_ms=%.3f "
         "postorder_ms=%.3f prepared_control_ms=%.3f "
         "offline_total_ms=%.3f\n",
-        n, controls.size(), normalize_ms, control_ms, postorder_ms,
+        n, controls.size(), controls.byte_size(), normalize_ms, control_ms, postorder_ms,
         prepared_control_ms, offline_ms);
 
     const size_t widths[] = {8, 16, 32, 64, 128, 256, 512, 1024};

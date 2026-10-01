@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include "PackedControls.hpp"
 
 namespace ofr
 {
@@ -30,7 +31,7 @@ enum OFRControlWord : uint8_t
 
 struct OFRBalanceResult
 {
-  std::vector<uint8_t> controls;
+  PackedControls controls;
   std::vector<uint8_t> top_tags;
   std::vector<uint8_t> bottom_tags;
 };
@@ -60,6 +61,27 @@ std::vector<uint8_t> OFRNormalize(const std::vector<uint8_t> &tags,
                                   size_t n_left,
                                   size_t n_right);
 
+void OFRNormalizeInPlace(std::vector<uint8_t> &tags,
+                         size_t n, size_t n_left, size_t n_right);
+
+namespace detail
+{
+// Internal owned-label path: the caller has generated only tags 0..3 and
+// accumulated their weights. Public normalization retains complete checking.
+void OFRNormalizeOwnedInPlace(std::vector<uint8_t> &tags,
+                              size_t n, size_t n_left, size_t n_right,
+                              size_t left_weight, size_t right_weight);
+size_t OFRControlWriteAndRouteNormalized(
+    std::vector<uint8_t> &tags, PackedControls &controls,
+    size_t *rows, size_t words_per_row, size_t n,
+    size_t n_left, size_t n_right, size_t position, size_t control_count,
+    std::vector<uint8_t> *feature_scratch = NULL);
+size_t OFRControlWritePostOrderAndRouteNormalized(
+    std::vector<uint8_t> &tags, PackedControls &controls,
+    size_t *rows, size_t words_per_row, size_t n,
+    size_t n_left, size_t n_right, size_t position, size_t control_count);
+} // namespace detail
+
 // Convenience wrapper that preserves tags and materializes both child arrays.
 OFRBalanceResult OFRBalance(const std::vector<uint8_t> &tags,
                             size_t n,
@@ -68,7 +90,7 @@ OFRBalanceResult OFRBalance(const std::vector<uint8_t> &tags,
 
 // Mutate one strided tag view and write its layer controls at position.
 size_t OFRBalanceInPlace(std::vector<uint8_t> &tags,
-                         std::vector<uint8_t> &controls,
+                         PackedControls &controls,
                          size_t base, size_t stride, size_t n,
                          size_t n_left, size_t n_right, size_t position);
 
@@ -76,7 +98,7 @@ size_t OFRControlCount(size_t n, size_t n_left, size_t n_right);
 
 // Compatibility wrapper: copies tags before generating controls.
 size_t OFRControlWrite(const std::vector<uint8_t> &tags,
-                       std::vector<uint8_t> &controls,
+                       PackedControls &controls,
                        size_t n,
                        size_t n_left,
                        size_t n_right,
@@ -85,31 +107,47 @@ size_t OFRControlWrite(const std::vector<uint8_t> &tags,
 // Preferred path: the root view is validated once; recursive views use the
 // capacities established by Balance and do not allocate child tag arrays.
 size_t OFRControlWrite(std::vector<uint8_t> &tags,
-                       std::vector<uint8_t> &controls,
+                       PackedControls &controls,
                        size_t base, size_t stride, size_t n,
                        size_t n_left, size_t n_right, size_t position);
 
 size_t OFRControlWrite(std::vector<uint8_t> &tags,
-                       std::vector<uint8_t> &controls,
+                       PackedControls &controls,
                        size_t n, size_t n_left, size_t n_right,
                        size_t position);
 
-std::vector<uint8_t> OFRControl(const std::vector<uint8_t> &tags,
+// Generate the same DFS tape while applying each gate to machine-word
+// membership rows. Tags must already have exact output responsibilities.
+size_t OFRControlWriteAndRoute(std::vector<uint8_t> &tags,
+                               PackedControls &controls,
+                               size_t *rows, size_t words_per_row,
+                               size_t n, size_t n_left, size_t n_right,
+                               size_t position);
+
+// Balanced power-of-two only: generate the final contiguous-block postorder
+// tape directly with public-size residue tiles, and route membership rows.
+size_t OFRControlWritePostOrderAndRoute(std::vector<uint8_t> &tags,
+                                        PackedControls &controls,
+                                        size_t *rows, size_t words_per_row,
+                                        size_t n, size_t n_left, size_t n_right,
+                                        size_t position);
+
+PackedControls OFRControl(const std::vector<uint8_t> &tags,
                                 size_t n,
                                 size_t n_left,
                                 size_t n_right);
 
 // Generate the prepared contiguous-block postorder tape for a balanced
-// power-of-two network, selecting the faster public-size-dependent layout.
-std::vector<uint8_t> OFRControlPostOrder(const std::vector<uint8_t> &tags,
+// power-of-two network using tiles selected from public dimensions.
+PackedControls OFRControlPostOrder(const std::vector<uint8_t> &tags,
                                          size_t n,
                                          size_t n_left,
                                          size_t n_right);
 
 // Reorder a balanced power-of-two control tape for the original level-order
 // OFork network. This conversion depends only on public dimensions.
-std::vector<uint8_t> OFRLevelOrderControls(
-    const std::vector<uint8_t> &controls,
+PackedControls OFRLevelOrderControls(
+    const PackedControls &controls,
     size_t n,
     size_t n_left,
     size_t n_right);
@@ -117,21 +155,21 @@ std::vector<uint8_t> OFRLevelOrderControls(
 // Offline conversion for balanced power-of-two dimensions. The resulting
 // tape finishes each contiguous half before the gates between the halves,
 // matching ORCompact's execution order.
-std::vector<uint8_t> OFRPostOrderControls(
-    const std::vector<uint8_t> &controls,
+PackedControls OFRPostOrderControls(
+    const PackedControls &controls,
     size_t n,
     size_t n_left,
     size_t n_right);
 
 // Convert one contiguous DFS control span without copying its source first.
-std::vector<uint8_t> OFRPostOrderControls(
-    const uint8_t *controls, size_t control_count,
+PackedControls OFRPostOrderControls(
+    PackedControlView controls,
     size_t n, size_t n_left, size_t n_right);
 
 // Apply controls in place. The first n_left records are the left output;
 // the remaining n_right records are the right output.
 void OFRApplyInPlace(unsigned char *data,
-                     const std::vector<uint8_t> &controls,
+                     const PackedControls &controls,
                      size_t n,
                      size_t n_left,
                      size_t n_right,
@@ -139,7 +177,7 @@ void OFRApplyInPlace(unsigned char *data,
 
 void OFRApplyLevelOrderedInPlace(
     unsigned char *data,
-    const std::vector<uint8_t> &level_controls,
+    const PackedControls &level_controls,
     size_t n,
     size_t n_left,
     size_t n_right,
@@ -148,29 +186,29 @@ void OFRApplyLevelOrderedInPlace(
 // Apply a tape returned by OFRPostOrderControls. Balanced power-of-two only.
 void OFRApplyPostOrderInPlace(
     unsigned char *data,
-    const std::vector<uint8_t> &postorder_controls,
+    const PackedControls &postorder_controls,
     size_t n,
     size_t n_left,
     size_t n_right,
     size_t block_size);
 
-// The following entry points skip the recursive control-count check. Call
-// them only with controls already validated during the offline prepare phase.
+// Prepared entry points validate the complete public control span before
+// applying it, then consume packed controls without per-gate bounds checks.
 void OFRApplyPreparedInPlace(
     unsigned char *data,
-    const std::vector<uint8_t> &controls,
+    const PackedControls &controls,
     size_t n,
     size_t n_left,
     size_t n_right,
     size_t block_size);
 
 void OFRApplyPreparedInPlace(
-    unsigned char *data, const uint8_t *controls, size_t control_count,
+    unsigned char *data, PackedControlView controls,
     size_t n, size_t n_left, size_t n_right, size_t block_size);
 
 void OFRApplyPreparedLevelOrderedInPlace(
     unsigned char *data,
-    const std::vector<uint8_t> &level_controls,
+    const PackedControls &level_controls,
     size_t n,
     size_t n_left,
     size_t n_right,
@@ -178,25 +216,24 @@ void OFRApplyPreparedLevelOrderedInPlace(
 
 void OFRApplyPreparedPostOrderInPlace(
     unsigned char *data,
-    const std::vector<uint8_t> &postorder_controls,
+    const PackedControls &postorder_controls,
     size_t n,
     size_t n_left,
     size_t n_right,
     size_t block_size);
 
 void OFRApplyPreparedPostOrderInPlace(
-    unsigned char *data, const uint8_t *postorder_controls,
-    size_t control_count, size_t n, size_t n_left, size_t n_right,
+    unsigned char *data, PackedControlView postorder_controls, size_t n, size_t n_left, size_t n_right,
     size_t block_size);
 
 // Replay a DFS control span on machine-word membership rows in place.
 void OFRApplyWordsInPlace(
     size_t *rows, size_t words_per_row,
-    const std::vector<uint8_t> &controls, size_t position,
+    const PackedControls &controls, size_t position,
     size_t n, size_t n_left, size_t n_right);
 
 OFRControlReadResult OFRControlRead(const unsigned char *data,
-                                    const std::vector<uint8_t> &controls,
+                                    const PackedControls &controls,
                                     size_t n,
                                     size_t n_left,
                                     size_t n_right,
@@ -204,7 +241,7 @@ OFRControlReadResult OFRControlRead(const unsigned char *data,
                                     size_t position);
 
 OFRDataResult OFRApply(const unsigned char *data,
-                       const std::vector<uint8_t> &controls,
+                       const PackedControls &controls,
                        size_t n,
                        size_t n_left,
                        size_t n_right,

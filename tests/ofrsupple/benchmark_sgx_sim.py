@@ -2,8 +2,9 @@
 """Run paired Supple (4) and OFRSupple (5) application benchmarks.
 
 Build and sign a SIM enclave first; this script only runs the application.
-Each application invocation includes one warm-up round and averages --repeat
-measured rounds. Trial order alternates to reduce order bias.
+Each application invocation includes --warmup warm-up rounds and averages
+--repeat measured rounds. Trial order alternates to reduce order bias. Use
+run_optimization_stage.py for per-round alternating ECALL measurements.
 """
 
 import argparse
@@ -38,6 +39,7 @@ BASELINE_CASES = {case[0] for case in CASES if case[0] not in
 FIELDS = (
     "case", "n", "m", "k", "block_size", "trial", "mode", "ecall_ms",
     "algorithm_ms", "control_ms", "apply_ms", "oswap_count",
+    "algorithm_heap_peak_bytes",
 )
 PROFILE_FIELDS = (
     "route_ms", "reorder_ms", "copy_ms", "shuffle_ms", "other_ms",
@@ -54,8 +56,9 @@ def main():
     parser.add_argument("--application", type=Path, required=True,
                         help="built Application/application (with a SIM enclave beside it)")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--repeat", type=int, default=9)
-    parser.add_argument("--trials", type=int, default=3)
+    parser.add_argument("--repeat", type=int, default=7)
+    parser.add_argument("--warmup", type=int, default=2)
+    parser.add_argument("--trials", type=int, default=1)
     parser.add_argument("--profile", action="store_true",
                         help="collect the same online phase breakdown for modes 4 and 5")
     parser.add_argument("--offline-profile", action="store_true",
@@ -63,8 +66,8 @@ def main():
     parser.add_argument("--cases", default="baseline",
                         help="comma-separated case names, baseline, or all; wide cases need a larger enclave heap")
     args = parser.parse_args()
-    if args.repeat < 1 or args.trials < 1:
-        parser.error("--repeat and --trials must be positive")
+    if args.repeat < 1 or args.trials < 1 or args.warmup < 0:
+        parser.error("--repeat and --trials must be positive; --warmup nonnegative")
 
     application = args.application.resolve()
     if not application.is_file():
@@ -98,7 +101,7 @@ def main():
         for trial in range(args.trials):
             for mode in ((4, 5) if trial % 2 == 0 else (5, 4)):
                 command = (str(application), str(mode), str(n), str(width),
-                           str(m / n), str(k), str(args.repeat))
+                           str(m / n), str(k), str(args.repeat), str(args.warmup))
                 run = subprocess.run(command, cwd=application.parent, env=env,
                                      text=True, capture_output=True, timeout=180,
                                      check=True)
@@ -108,6 +111,11 @@ def main():
                     raise RuntimeError(f"unexpected output for {name}, mode {mode}: "
                                        f"{run.stdout!r}; stderr={run.stderr!r}")
                 values = [float(value) for value in lines[:5]]
+                memory = [line for line in run.stdout.splitlines()
+                          if line.startswith("MEMORY,")]
+                if len(memory) != 1:
+                    raise RuntimeError(f"missing heap measurement: {run.stdout!r}")
+                heap_peak = int(memory[0].split(",")[1])
                 if values[1] <= 0 or abs(values[1] - values[2] - values[3]) > 0.01:
                     raise RuntimeError(f"invalid timings for {name}, mode {mode}: "
                                        f"{values}")
@@ -130,7 +138,7 @@ def main():
                     offline_phases += [int(token) for token in tokens[11:]]
                     if abs(sum(offline_phases[:10]) - values[2]) > 0.1:
                         raise RuntimeError(f"phase sum differs from offline time: {offline_phases}")
-                rows.append((name, n, m, k, width, trial, mode, *values,
+                rows.append((name, n, m, k, width, trial, mode, *values, heap_peak,
                              *phases, *offline_phases))
                 print(name, trial, mode, *(f"{value:.3f}" for value in values[:4]),
                       flush=True)

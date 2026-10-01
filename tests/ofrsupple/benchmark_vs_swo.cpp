@@ -1,133 +1,186 @@
+#include <chrono>
+#define ocall_clock host_stub_ocall_clock
 #include "../swo/host_support.hpp"
+#undef ocall_clock
+static void ocall_clock(long *t) {
+  *t = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 #include "../../Enclave/SubSample_v2/SWO/helper.cpp"
 #include "../../Enclave/SubSample_v2/SWO/SuppleSWO.cpp"
 #include "../../Enclave/SubSample_v2/OFRSupple/OFRSupple.cpp"
-
-#include <chrono>
-#include <numeric>
 #include <string>
 
 thread_local uint64_t OSWAP_COUNTER = 0;
-
-namespace
-{
-
-volatile size_t benchmark_sink = 0;
-
-double Median(std::vector<double> values)
-{
-  std::sort(values.begin(), values.end());
-  return values[values.size() / 2];
+#ifdef SUPPLE_MEMORY_TRACKING
+extern "C" void *__wrap_malloc(size_t);
+extern "C" void __wrap_free(void *);
+void *operator new(size_t n) {
+  void *p = __wrap_malloc(n ? n : 1);
+  if (!p) throw std::bad_alloc();
+  return p;
 }
+void operator delete(void *p) noexcept { __wrap_free(p); }
+void *operator new[](size_t n) { return ::operator new(n); }
+void operator delete[](void *p) noexcept { ::operator delete(p); }
+#endif
 
-template <typename F>
-double TimeMs(F fn)
-{
+namespace {
+volatile size_t benchmark_sink = 0;
+template <class Tape> auto TapeBytes(const Tape &t) -> decltype(t.byte_size()) {
+  return t.byte_size();
+}
+size_t TapeBytes(const std::vector<uint8_t> &t) { return t.size(); }
+template <class F> double TimeMs(F fn) {
   const auto begin = std::chrono::steady_clock::now();
   fn();
-  const auto end = std::chrono::steady_clock::now();
-  return std::chrono::duration<double, std::milli>(end - begin).count();
+  return std::chrono::duration<double, std::milli>(
+      std::chrono::steady_clock::now() - begin).count();
 }
+double Median(std::vector<double> values) {
+  std::sort(values.begin(), values.end());
+  const size_t half = values.size()/2;
+  return values.size()%2 ? values[half] : (values[half-1]+values[half])/2;
+}
+struct Result {
+  double control = 0, apply = 0, total = 0;
+  size_t tape_bytes = 0, heap = 0;
+  enc_ret phases{};
+};
 
-void Run(const char *name, size_t n, size_t m, size_t k, size_t width,
-         size_t rounds)
-{
-  const size_t words = swo_detail::MarkWords(k);
-  std::vector<size_t> membership(n * words, 0);
-  std::mt19937 source_rng(20260927);
-  std::vector<size_t> indices(n);
-  for (size_t j = 0; j < k; ++j)
+Result Measure(bool use_ofr, const std::vector<size_t> &membership,
+               const std::vector<unsigned char> &data,
+               const std::vector<FrontierNode> &frontier,
+               size_t n, size_t m, size_t k, size_t width,
+               bool memory, bool profile) {
+  Result result;
+  enc_ret ret{};
+  ret.collect_memory_profile = memory;
   {
-    std::iota(indices.begin(), indices.end(), 0);
-    std::shuffle(indices.begin(), indices.end(), source_rng);
-    for (size_t t = 0; t < m; ++t)
-      membership[indices[t] * words + j / swo_detail::SwoWordBits()] |=
-          size_t(1) << (j % swo_detail::SwoWordBits());
-  }
-  const std::vector<FrontierNode> frontier = m * k > n
-      ? SWOFrontier(n, m, k) : std::vector<FrontierNode>{};
-  std::vector<unsigned char> data(n * width);
-  for (size_t i = 0; i < data.size(); ++i)
-    data[i] = static_cast<unsigned char>(i * 37 + 13);
-
-  const auto swo_nodes = swo_detail::SwoRootNodes(frontier, k);
-  const size_t swo_bits = SWOControlCount(swo_nodes, n, m);
-  const OFRSuppleControlCounts ofr_counts =
-      OFRSuppleControlCount(frontier, n, m, k);
-  std::vector<uint8_t> swo_controls = SWOControl(membership, frontier, n, m, k);
-  OFRSuppleControls ofr_controls =
-      OFRSuppleControl(membership, frontier, n, m, k);
-  std::vector<double> swo_control, ofr_control, swo_apply, ofr_apply;
-
-  for (size_t round = 0; round < rounds + 2; ++round)
-  {
-    double sc = 0, oc = 0, sa = 0, oa = 0;
-    const auto run_swo_control = [&] {
-      sc = TimeMs([&] {
-        swo_controls = SWOControl(membership, frontier, n, m, k);
-        benchmark_sink ^= swo_controls.size();
+    memory_profile::Scope scope(&ret);
+    if (use_ofr) {
+      OFRSuppleControls controls;
+      result.control = TimeMs([&] {
+        controls = OFRSuppleControl(membership, frontier, n, m, k,
+                                   profile ? &result.phases : nullptr);
       });
-    };
-    const auto run_ofr_control = [&] {
-      oc = TimeMs([&] {
-        ofr_controls = OFRSuppleControl(membership, frontier, n, m, k);
-        benchmark_sink ^= ofr_controls.ofr.size();
-      });
-    };
-    const auto run_swo_apply = [&] {
-      sa = TimeMs([&] {
-        const auto result = SWOApply(data.data(), swo_controls, frontier,
-                                     n, m, k, width);
-        benchmark_sink ^= result[round % result.size()];
-      });
-    };
-    const auto run_ofr_apply = [&] {
-      oa = TimeMs([&] {
-        const auto result = OFRSuppleApply(data.data(), ofr_controls, frontier,
+      result.tape_bytes = controls.swo.size() + TapeBytes(controls.ofr);
+      result.apply = TimeMs([&] {
+        const auto output = OFRSuppleApply(data.data(), controls, frontier,
                                            n, m, k, width);
-        benchmark_sink ^= result[round % result.size()];
+        benchmark_sink ^= output[output.size()/3];
       });
-    };
-    if (round % 2 == 0)
-    {
-      run_swo_control();
-      run_ofr_control();
-      run_swo_apply();
-      run_ofr_apply();
+    } else {
+      std::vector<uint8_t> controls;
+      result.control = TimeMs([&] {
+        controls = SWOControl(membership, frontier, n, m, k);
+      });
+      result.tape_bytes = controls.size();
+      result.apply = TimeMs([&] {
+        const auto output = SWOApply(data.data(), controls, frontier,
+                                     n, m, k, width);
+        benchmark_sink ^= output[output.size()/3];
+      });
     }
-    else
-    {
-      run_ofr_control();
-      run_swo_control();
-      run_ofr_apply();
-      run_swo_apply();
-    }
-    if (round >= 2)
-    {
-      swo_control.push_back(sc);
-      ofr_control.push_back(oc);
-      swo_apply.push_back(sa);
-      ofr_apply.push_back(oa);
-    }
+    scope.Complete();
   }
-  std::printf("%s,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%.6f,%.6f,%.6f,%.6f\n",
-              name, n, m, k, width, swo_bits, ofr_counts.swo_bits,
-              ofr_counts.ofr_words, Median(swo_control), Median(ofr_control),
-              Median(swo_apply), Median(ofr_apply));
+  if (memory && ret.memory_profile_status != MEMORY_PROFILE_VALID)
+    throw std::runtime_error("Native heap measurement invalid");
+  result.heap = ret.algorithm_heap_peak_bytes;
+  result.total = result.control + result.apply;
+  return result;
 }
 
+void Print(const char *kind, const char *name, size_t n, size_t m, size_t k,
+           size_t width, const char *method, size_t round, bool memory,
+           bool profile, const Result &r) {
+  std::printf("%s,%s,%zu,%zu,%zu,%zu,%s,%zu,%d,%d,%.6f,%.6f,%.6f,%zu,%zu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+      kind,name,n,m,k,width,method,round,int(memory),int(profile),r.control,
+      r.apply,r.total,r.tape_bytes,r.heap,
+      r.phases.offline_tags_ms,r.phases.offline_normalize_ms,
+      r.phases.offline_ofr_write_ms,r.phases.offline_replay_ms,
+      r.phases.offline_project_ms,r.phases.offline_prepare_ms);
+  std::fflush(stdout);
+}
+void Run(const char *name, size_t n, size_t m, size_t k, size_t width,
+         size_t rounds, size_t warmup, bool memory, bool profile) {
+  if (n == 0 || m == 0 || m > n || k == 0 || width < sizeof(uint32_t) ||
+      k > SIZE_MAX/m || n > SIZE_MAX/width)
+    throw std::invalid_argument("Invalid benchmark dimensions");
+  rng.seed(20260927);
+  const std::vector<size_t> membership = SWOMark(n,m,k);
+  const std::vector<FrontierNode> frontier = m*k > n ?
+      SWOFrontier(n,m,k) : std::vector<FrontierNode>{};
+  std::vector<unsigned char> data(n*width);
+  for (size_t i=0;i<data.size();++i) data[i] = uint8_t(i*37+13);
+  std::vector<double> control[2], apply[2], total[2];
+  Result latest[2];
+  size_t peaks[2] = {0,0};
+  for (size_t round=0;round<warmup+rounds;++round) {
+    for (size_t j=0;j<2;++j) {
+      const size_t method = (round+j)%2;
+      Result r = Measure(method != 0,membership,data,frontier,n,m,k,width,
+                         memory,profile);
+      if (round < warmup) continue;
+      latest[method] = r;
+      peaks[method] = std::max(peaks[method],r.heap);
+      control[method].push_back(r.control);
+      apply[method].push_back(r.apply);
+      total[method].push_back(r.control+r.apply);
+      Print("round",name,n,m,k,width,method?"OFRSupple":"Supple",
+            round-warmup,memory,profile,r);
+    }
+  }
+  for (size_t method=0;method<2;++method) {
+    Result r = latest[method];
+    r.control=Median(control[method]);
+    r.apply=Median(apply[method]);
+    r.heap=peaks[method];
+    // Each median row reports the median per-round total.
+    r.total=Median(total[method]);
+    Print("median",name,n,m,k,width,method?"OFRSupple":"Supple",
+          rounds,memory,profile,r);
+  }
+}
 } // namespace
 
-int main(int argc, char **argv)
-{
-  const size_t rounds = argc > 1 ? static_cast<size_t>(std::stoul(argv[1])) : 7;
-  if (rounds == 0) return 2;
-  std::puts("case,n,m,k,width,swo_bits,ofr_swo_bits,ofr_words,"
-            "swo_control_ms,ofr_control_ms,swo_apply_ms,ofr_apply_ms");
-  Run("compact", 4096, 16, 16, 16, rounds);
-  Run("equal", 4096, 64, 64, 16, rounds);
-  Run("frontier", 4096, 64, 128, 16, rounds);
-  Run("mixed", 4096, 48, 128, 16, rounds);
-  Run("equal_wide", 4096, 64, 64, 64, rounds);
-  return static_cast<int>(benchmark_sink == 0xfffe);
+int main(int argc,char **argv) {
+  try {
+    size_t rounds=7,warmup=2,n=0,m=0,k=0,width=0;
+    bool matrix=false,memory=false,profile=false;
+    for (int arg=1;arg<argc;++arg) {
+      const std::string token(argv[arg]);
+      if (token=="--matrix") matrix=true;
+      else if (token=="--memory") memory=true;
+      else if (token=="--profile") profile=true;
+      else if (token=="--warmup" && arg+1<argc) warmup=std::stoull(argv[++arg]);
+      else if (token=="--case" && arg+4<argc) {
+        n=std::stoull(argv[++arg]);m=std::stoull(argv[++arg]);
+        k=std::stoull(argv[++arg]);width=std::stoull(argv[++arg]);
+      } else if (!token.empty() && token[0]!='-') rounds=std::stoull(token);
+      else throw std::invalid_argument("Usage: benchmark [rounds] [--warmup N] [--matrix | --case N M K WIDTH] [--memory] [--profile]");
+    }
+    if (rounds==0 || warmup>SIZE_MAX-rounds)
+      throw std::invalid_argument("Invalid round count");
+    std::puts("kind,case,n,m,k,width,method,round,memory_tracking,profile,control_ms,apply_ms,total_ms,control_bytes,control_apply_heap_peak_bytes,tags_ms,normalize_ms,write_ms,replay_ms,project_ms,prepare_ms");
+    if (n) Run("custom",n,m,k,width,rounds,warmup,memory,profile);
+    else if (matrix) {
+      for (size_t size : {size_t(1)<<16,size_t(1)<<18,size_t(1)<<20,
+                          size_t(1)<<22,size_t(1)<<24})
+        Run("equal_k16",size,size/16,16,8,rounds,warmup,memory,profile);
+      for (size_t size : {size_t(1)<<20,size_t(1)<<22})
+        Run("equal_k64",size,size/64,64,16,rounds,warmup,memory,profile);
+    } else {
+      Run("compact",4096,16,16,16,rounds,warmup,memory,profile);
+      Run("equal",4096,64,64,16,rounds,warmup,memory,profile);
+      Run("frontier",4096,64,128,16,rounds,warmup,memory,profile);
+      Run("mixed",4096,48,128,16,rounds,warmup,memory,profile);
+      Run("equal_wide",4096,64,64,64,rounds,warmup,memory,profile);
+      Run("equal_256",4096,64,64,256,rounds,warmup,memory,profile);
+      Run("mixed_256",4096,48,128,256,rounds,warmup,memory,profile);
+    }
+    return 0;
+  } catch(const std::exception &error) {
+    std::fprintf(stderr,"%s\n",error.what());return 1;
+  }
 }

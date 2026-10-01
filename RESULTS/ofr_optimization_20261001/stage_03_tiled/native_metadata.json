@@ -1,0 +1,26 @@
+{
+  "stage": "tiled",
+  "backend": "native",
+  "source": "/root/Supple",
+  "build": "/tmp/supple-ofr-tiled.oz_1p9po",
+  "source_sha256": "fabc72845990cd37905f3a313a25a1ec622dbca3b4eac83fb5805686245fc549",
+  "commit": "fb2fcac45d906eb91416291ce9705ba3d9d88140",
+  "rounds": 7,
+  "warmup": 2,
+  "matrix": true,
+  "case": null,
+  "from_stage": "/root/Supple/RESULTS/ofr_optimization_20261001/stage_03_tiled",
+  "cpu_model": "Intel(R) Xeon(R) Platinum 8369B CPU @ 2.70GHz",
+  "cpu_affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "host": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
+  "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+}
