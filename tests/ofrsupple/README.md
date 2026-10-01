@@ -15,7 +15,7 @@ randomness, encryption, and leaf shuffle.
 For performance comparisons, `run_benchmark.sh` measures the production
 algorithms on the host with real Compact and OFork operations. After building
 and signing a SIM enclave, `benchmark_sgx_sim.py --application <path> --output
-<path>` measures application modes 6 and 8 with alternating order. The SGX SIM
+<path>` measures application modes 4 and 5 with alternating order. The SGX SIM
 measurements and setup are recorded in `RESULTS/ofrsupple_vs_swo_sgx_sim.md`.
 
 After signing with a heap large enough for the selected case, add `--profile`

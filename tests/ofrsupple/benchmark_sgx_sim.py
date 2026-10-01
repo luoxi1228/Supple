@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run paired Supple (6) and OFRSupple (8) application benchmarks.
+"""Run paired Supple (4) and OFRSupple (5) application benchmarks.
 
 Build and sign a SIM enclave first; this script only runs the application.
 Each application invocation includes one warm-up round and averages --repeat
@@ -57,7 +57,7 @@ def main():
     parser.add_argument("--repeat", type=int, default=9)
     parser.add_argument("--trials", type=int, default=3)
     parser.add_argument("--profile", action="store_true",
-                        help="collect the same online phase breakdown for modes 6 and 8")
+                        help="collect the same online phase breakdown for modes 4 and 5")
     parser.add_argument("--offline-profile", action="store_true",
                         help="collect offline phase timings and enclave heap high-water marks")
     parser.add_argument("--cases", default="baseline",
@@ -96,13 +96,14 @@ def main():
         if name not in wanted:
             continue
         for trial in range(args.trials):
-            for mode in ((6, 8) if trial % 2 == 0 else (8, 6)):
+            for mode in ((4, 5) if trial % 2 == 0 else (5, 4)):
                 command = (str(application), str(mode), str(n), str(width),
                            str(m / n), str(k), str(args.repeat))
                 run = subprocess.run(command, cwd=application.parent, env=env,
                                      text=True, capture_output=True, timeout=180,
                                      check=True)
-                lines = run.stdout.strip().splitlines()
+                lines = [line for line in run.stdout.strip().splitlines()
+                         if not line.startswith("MEMORY,")]
                 if len(lines) != 5 + int(args.profile) + int(args.offline_profile):
                     raise RuntimeError(f"unexpected output for {name}, mode {mode}: "
                                        f"{run.stdout!r}; stderr={run.stderr!r}")

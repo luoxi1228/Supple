@@ -35,10 +35,10 @@ def available_cpu_count():
   return max(1, len(physical_cores))
 
 
-DEFAULT_MODE = [9,2,6,8]
+DEFAULT_MODE = [1, 2, 3, 4, 5]
 DEFAULT_P = [0.015625]
 DEFAULT_N = [1048576]
-DEFAULT_K = [256]
+DEFAULT_K = [64]
 DEFAULT_K_SELECT = 2   # 1 => k = 1/p, 2 => use --k list
 DEFAULT_BLOCK_SIZE = [16]
 DEFAULT_REPEAT = 5
@@ -50,21 +50,24 @@ SIZE_T_BYTES = int(os.getenv("SIZE_T_BYTES", "8"))
 WORD_BITS = SIZE_T_BYTES * 8
 
 MODE_INFO = {
-  1: {"name": "PSQF_single", "needs_k": False, "detailed": False, "fixed_k": True},
+  1: {"name": "ShuffleBasedSWO", "needs_k": True, "detailed": True, "fixed_k": False},
   2: {"name": "PSQF_SWO", "needs_k": False, "detailed": False, "fixed_k": False},
-  3: {"name": "SubSample", "needs_k": False, "detailed": False, "fixed_k": True},
-  4: {"name": "SubSampleMultiSlice", "needs_k": True, "detailed": True, "fixed_k": False},
-  5: {"name": "SubSampleMulti_opt", "needs_k": True, "detailed": True, "fixed_k": False},
-  6: {"name": "Supple", "needs_k": True, "detailed": True, "fixed_k": False},
-  7: {"name": "Supple_parallel", "needs_k": True, "detailed": True, "fixed_k": False},
-  8: {"name": "OFRSupple", "needs_k": True, "detailed": True, "fixed_k": False},
-  9: {"name": "ShuffleBasedSWO", "needs_k": True, "detailed": True, "fixed_k": False},
+  3: {"name": "CompactionBasedSWO", "needs_k": True, "detailed": True, "fixed_k": False},
+  4: {"name": "Supple", "needs_k": True, "detailed": True, "fixed_k": False},
+  5: {"name": "OFRSupple", "needs_k": True, "detailed": True, "fixed_k": False},
+
+  10: {"name": "PSQF_single", "needs_k": False, "detailed": False, "fixed_k": True},
+  11: {"name": "SubSample", "needs_k": False, "detailed": False, "fixed_k": True},
+  12: {"name": "SubSampleMultiSlice", "needs_k": True, "detailed": True, "fixed_k": False},
+  13: {"name": "SubSampleMulti_opt", "needs_k": True, "detailed": True, "fixed_k": False},
+  14: {"name": "Supple_parallel", "needs_k": True, "detailed": True, "fixed_k": False},
 }
 
-CSV_HEADER_MODES = {2, 6, 8, 9}
+CSV_HEADER_MODES = {1, 2, 3, 4, 5}
 CSV_COMMON_FIELDS = ("block_size", "p", "n", "k", "ecall_time_ms", "ptime_ms")
 CSV_DETAILED_FIELDS = ("gen_perm_offline_ms", "apply_perm_online_ms")
 CSV_TRAILING_FIELDS = ("oswaps", "heap_est_mb")
+CSV_MEMORY_TRAILING_FIELDS = ("oswaps", "algorithm_heap_peak_mib")
 
 
 def parse_csv(raw, arg_name, cast):
@@ -97,9 +100,9 @@ def parse_args():
   parser.add_argument("--modes", default=",".join(map(str, DEFAULT_MODE)), help="Comma-separated modes, e.g. 3,4")
   parser.add_argument("--n", default=",".join(map(str, DEFAULT_N)), help="Comma-separated N values")
   parser.add_argument("--p", default=",".join(map(str, DEFAULT_P)), help="Comma-separated P values (0 < P <= 1)")
-  parser.add_argument("--k", default=",".join(map(str, DEFAULT_K)), help="Comma-separated K values (used by modes 4/5/6/7/8/9)")
+  parser.add_argument("--k", default=",".join(map(str, DEFAULT_K)), help="Comma-separated K values (used by modes 1/3/4/5/12/13/14)")
   parser.add_argument("--k-select", type=int, choices=[1, 2], default=DEFAULT_K_SELECT,
-                      help="Modes 4/5/6/7/8/9 K selection: 1 => k=1/p, 2 => use --k list")
+                      help="Modes 1/3/4/5/12/13/14 K selection: 1 => k=1/p, 2 => use --k list")
   parser.add_argument("--block-sizes", default=",".join(map(str, DEFAULT_BLOCK_SIZE)), help="Comma-separated block sizes")
   parser.add_argument(
     "--repeat", type=int, default=DEFAULT_REPEAT,
@@ -107,16 +110,16 @@ def parse_args():
   )
   parser.add_argument("--warmup", type=int, default=DEFAULT_WARMUP,
                       help="Number of warm-up rounds excluded from the average")
-  parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Thread count for mode 7")
+  parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Thread count for mode 14")
   parser.add_argument("--results-folder", default=DEFAULT_RESULTS_FOLDER, help="Results folder path")
   parser.add_argument("--overwrite", action="store_true", help="Overwrite each mode CSV on first write")
   offline_group = parser.add_mutually_exclusive_group()
   offline_group.add_argument("--offline-profile", dest="offline_profile",
                              action="store_true",
-                             help="Collect offline phase timings and enclave heap high-water marks for modes 6 and 8 (adds timing overhead)")
+                             help="Collect offline phase timings and enclave heap high-water marks for modes 4 and 5 (adds timing overhead)")
   offline_group.add_argument("--no-offline-profile", dest="offline_profile",
                              action="store_false",
-                             help="Skip offline profiling for modes 6 and 8")
+                             help="Skip offline profiling for modes 4 and 5")
   parser.set_defaults(offline_profile=False)
   return parser.parse_args()
 
@@ -216,7 +219,7 @@ def ofrsupple_control_counts(n, m, k):
   return count_node(n, k, frontier)
 
 
-def mode5_workspace_bytes(n, m, k, block_size):
+def subsample_multi_opt_workspace_bytes(n, m, k, block_size):
   mark_words_total = 0
   data_items_total = 0
   level = [(n, k)]
@@ -274,13 +277,20 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=1):
     heap_memory += derived_k(n, m) * SIZE_T_BYTES
     heap_memory = int(math.ceil(heap_memory * 1.15))
 
-  elif mode == 9:
+  elif mode == 1:
     k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
     # One decrypted dataset, K plaintext samples, and shuffle selection scratch.
     heap_memory += (m * k * block_size) + n + 64 * 1024
     heap_memory = int(math.ceil(heap_memory * 1.25))
 
-  elif mode == 4:
+  elif mode == 3:
+    k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
+    # Decrypted input is already in the base; one reusable bool[N] and the
+    # compaction prefix counts coexist with all K plaintext output samples.
+    heap_memory += (m * k * block_size) + n + (n + 1) * 4 + 64 * 1024
+    heap_memory = int(math.ceil(heap_memory * 1.25))
+
+  elif mode == 12:
     k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
     mask_words, left_words, right_words = route_state_sizes(n, m, k)
     heap_memory += (
@@ -294,7 +304,7 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=1):
     )
     heap_memory = int(math.ceil(heap_memory * 1.25))
 
-  elif mode == 8:
+  elif mode == 5:
     k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
     mask_words = (k + WORD_BITS - 1) // WORD_BITS
     swo_bits, ofr_words = ofrsupple_control_counts(n, m, k)
@@ -314,7 +324,7 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=1):
     heap_memory += max(offline_peak, online_peak) + 64 * 1024
     heap_memory = int(math.ceil(heap_memory * 1.35))
 
-  elif mode in (5, 6, 7):
+  elif mode in (13, 4, 14):
     k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
     mask_words, left_words, right_words = route_state_sizes(n, m, k)
     route_bytes = (node_num(n, m, k) + 7) // 8
@@ -325,12 +335,12 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=1):
     plain_result_bytes = (m * k) * block_size
     workspace_data_bytes = 3 * n * block_size
 
-    if mode == 5:
-      opt_mark_workspace_bytes, opt_data_workspace_bytes = mode5_workspace_bytes(n, m, k, block_size)
+    if mode == 13:
+      opt_mark_workspace_bytes, opt_data_workspace_bytes = subsample_multi_opt_workspace_bytes(n, m, k, block_size)
       phase1_peak = mark_bytes + route_bytes + opt_mark_workspace_bytes + selected_bytes + mark_range_bytes
       phase2_peak = route_bytes + plain_result_bytes + opt_data_workspace_bytes + selected_bytes
       heap_memory += max(phase1_peak, phase2_peak) + 64 * 1024
-    elif mode == 6:
+    elif mode == 4:
       heap_memory += (
         route_bytes +
         mark_bytes +
@@ -381,7 +391,7 @@ def build_command(mode, n, block_size, sample_prob, k_value, repeat, threads, wa
   cmd = ["./application", str(mode), str(n), str(block_size), str(sample_prob)]
   if MODE_INFO[mode]["needs_k"]:
     cmd.append(str(k_value))
-  if mode == 7:
+  if mode == 14:
     cmd.append(str(threads))
   cmd.append(str(repeat))
   cmd.append(str(warmup))
@@ -397,7 +407,7 @@ def resolve_results_folder(raw_path):
 
 def parse_output(mode, output):
   lines = [line.strip() for line in output.splitlines()
-           if line.strip() and not line.startswith(("PROFILE,", "OFFLINE_PROFILE,"))]
+           if line.strip() and not line.strip().startswith(("PROFILE,", "OFFLINE_PROFILE,", "MEMORY,"))]
   expected = 5 if MODE_INFO[mode]["detailed"] else 3
   if len(lines) < expected:
     return None
@@ -411,6 +421,17 @@ def parse_output(mode, output):
     print("Line with value error is:")
     print(lines)
     return None
+
+
+def parse_memory_peak(output):
+  lines = [line.strip() for line in output.splitlines()
+           if line.strip().startswith("MEMORY,")]
+  if len(lines) != 1:
+    return None
+  fields = lines[0].split(",")
+  if len(fields) != 2 or not fields[1].isascii() or not fields[1].isdigit():
+    return None
+  return int(fields[1])
 
 
 OFFLINE_PROFILE_FIELDS = (
@@ -456,11 +477,12 @@ def result_csv_header(mode):
   fields = CSV_COMMON_FIELDS
   if MODE_INFO[mode]["detailed"]:
     fields += CSV_DETAILED_FIELDS
-  return ",".join(fields + CSV_TRAILING_FIELDS) + "\n"
+  trailing = CSV_MEMORY_TRAILING_FIELDS if mode in CSV_HEADER_MODES else CSV_TRAILING_FIELDS
+  return ",".join(fields + trailing) + "\n"
 
 
 def prepare_result_csv(path, mode, overwrite):
-  """Start one run for a headered CSV, preserving older headerless results."""
+  """Append measured peaks; archive legacy estimates without relabeling them."""
   header = result_csv_header(mode).encode("utf-8")
   if overwrite or not path.is_file() or path.stat().st_size == 0:
     path.write_bytes(header)
@@ -470,21 +492,34 @@ def prepare_result_csv(path, mode, overwrite):
     first_line = existing.readline()
   if first_line.rstrip(b"\r\n") != header.rstrip(b"\n"):
     first_fields = first_line.rstrip(b"\r\n").split(b",")
-    if len(first_fields) != len(header.rstrip(b"\n").split(b",")) or not first_fields[0].isdigit():
+    legacy_header = header.rstrip(b"\n").rsplit(b",", 1)[0] + b",heap_est_mb"
+    headerless = (len(first_fields) == len(header.rstrip(b"\n").split(b","))
+                  and first_fields[0].isdigit())
+    if first_line.rstrip(b"\r\n") != legacy_header and not headerless:
       raise ValueError(f"CSV header does not match mode {mode}: {path}")
-    # Older result files were headerless. Add the header without discarding data.
+    # Hard-link reservation refuses collisions atomically. Replacement of the
+    # original below leaves the backup's bytes and permissions intact.
+    suffix = 0
+    while True:
+      number = f".{suffix}" if suffix else ""
+      backup = path.with_name(f"{path.stem}.heap_est_backup{number}{path.suffix}")
+      try:
+        os.link(path, backup)
+        break
+      except FileExistsError:
+        suffix += 1
     temp_path = None
     try:
       with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as updated:
         temp_path = Path(updated.name)
         updated.write(header)
-        with path.open("rb") as existing:
-          shutil.copyfileobj(existing, updated)
       shutil.copymode(path, temp_path)
       os.replace(temp_path, path)
     finally:
       if temp_path is not None:
         temp_path.unlink(missing_ok=True)
+    print(f"Backed up legacy heap estimates: {backup}")
+    return
 
   with path.open("rb") as existing:
     existing.readline()
@@ -516,6 +551,7 @@ def main():
   warmup = int(args.warmup)
   threads = int(args.threads)
   initialized_csv_files = set()
+  had_failed_run = False
 
   if repeat <= 0:
     print("REPEAT must be > 0")
@@ -562,7 +598,7 @@ def main():
               return 1
             cmd = build_command(mode, n, block_size, p_rate, k_value, repeat, threads, warmup)
 
-            if mode == 7:
+            if mode == 14:
               effective_threads = swo_effective_threads(n, m_value, k_value, threads)
               print(
                 "Running experiment: mode = %d (%s), b = %d, p = %.4f, n = %d, m = %d, k = %d, threads = %d, active_threads = %d, heap_est = %.2f MB"
@@ -582,6 +618,7 @@ def main():
             proc = subprocess.run(cmd, cwd=str(APP_DIR), env=env,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if proc.returncode != 0:
+              had_failed_run = True
               print("Program exited with non-zero status:", proc.returncode)
               if proc.stderr:
                 print("stderr:\n", proc.stderr.decode("utf-8", errors="ignore"))
@@ -590,13 +627,24 @@ def main():
             output = proc.stdout.decode("utf-8", errors="ignore")
             parsed = parse_output(mode, output)
             if parsed is None:
+              had_failed_run = True
               print("Receieved unexpected output, this experiment run has failed. ONE MUST DEBUG!")
               continue
 
-            print("Out_lines: %s\n" % (parsed,))
-            results[(n, k_value)] = make_result(mode, k_value, parsed, heap_mb)
+            recorded_memory_mib = heap_mb
+            if mode in CSV_HEADER_MODES:
+              peak_bytes = parse_memory_peak(output)
+              if peak_bytes is None or peak_bytes == 0:
+                had_failed_run = True
+                print("Algorithm heap measurement is missing or invalid; skipping result")
+                continue
+              recorded_memory_mib = peak_bytes / (1024.0 * 1024.0)
+              print(f"Measured algorithm heap peak: {peak_bytes} bytes ({recorded_memory_mib:.6f} MiB)")
 
-            if args.offline_profile and mode in (6, 8):
+            print("Out_lines: %s\n" % (parsed,))
+            results[(n, k_value)] = make_result(mode, k_value, parsed, recorded_memory_mib)
+
+            if args.offline_profile and mode in (4, 5):
               # Run diagnostics separately so their clock OCALLs never enter
               # the normal CSV's offline or online totals.
               profile_env = env.copy()
@@ -632,7 +680,7 @@ def main():
           with open(csv_file_name, file_mode) as csv_file:
             for n, k_used in sorted(results.keys(), key=lambda item: (item[0], item[1])):
               csv_file.write(format_csv_line(mode, block_size, p_rate, n, results[(n, k_used)]))
-        if args.offline_profile and mode in (6, 8):
+        if args.offline_profile and mode in (4, 5):
           profile_file = results_folder / (mode_name + "_offline_profile.csv")
           profile_mode = "w" if args.overwrite and profile_file not in initialized_csv_files else "a"
           initialized_csv_files.add(profile_file)
@@ -645,7 +693,7 @@ def main():
               csv_file.write(",".join(map(str, (block_size, p_rate, n, k_used,
                                                 heap_mb) + phases)) + "\n")
 
-  return 0
+  return 1 if had_failed_run else 0
 
 
 if __name__ == "__main__":

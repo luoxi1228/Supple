@@ -53,7 +53,8 @@ Default group layout in `run.py`:
 - `group_b`: sweep block size
 - `group_n`: sweep `n`
 
-All groups currently use modes `[1,2,3,4,5,6]`.
+The groups preserve their original algorithm selection with modes
+`[10,2,11,12,13,4]`. The direct script defaults to `[1,2,3,4,5]`.
 
 ## 2.2 Direct Run (Single Command)
 
@@ -61,7 +62,7 @@ From the project root:
 
 ```bash
 ./run_experiments.py \
-    --modes 1,2,3,4,5,6 \
+    --modes 1,2,3,4,5 \
     --n 1048576 \
     --p 0.015625 \
     --k 4,16,64,256,1024 \
@@ -75,7 +76,7 @@ From the project root:
 To compare the online phases of Supple and OFRSupple at one configuration:
 
 ```bash
-./run_experiments.py --modes 6,8 --n 65536 --p 0.015625 \
+./run_experiments.py --modes 4,5 --n 65536 --p 0.015625 \
     --k 64 --k-select 2 --block-sizes 64 --repeat 5 --overwrite
 ```
 
@@ -86,7 +87,7 @@ For a route, reorder, copy, and Shuffle breakdown, see
 
 The default `run_experiments.py` run measures offline and online totals without
 offline phase clocks. Pass `--offline-profile` to collect offline phase timings
-and the SGX heap high-water mark for modes 6 and 8. This runs each case a
+and the SGX heap high-water mark for modes 4 and 5. This runs each case a
 second time for diagnostics; the regular result CSV always uses the run
 without offline phase clocks. The diagnostic run writes
 `Supple_offline_profile.csv` and `OFRSupple_offline_profile.csv` beside the
@@ -119,23 +120,31 @@ updated by a normal run.
 
 ### Mode List (Current)
 
-- `1`: PSQF_single
-- `2`: PSQF_SWO
-- `3`: SubSample
-- `4`: SubSampleMultiSlice
-- `5`: SubSampleMulti_opt
-- `6`: Supple
-- `7`: Supple_parallel
-- `8`: OFRSupple
-- `9`: ShuffleBasedSWO; shuffle all records once per sample, then take the first `m`
+| Mode | Algorithm | Previous mode |
+| --- | --- | --- |
+| 1 | ShuffleBasedSWO | 9 |
+| 2 | PSQF_SWO | 2 |
+| 3 | CompactionBasedSWO | 10 |
+| 4 | Supple | 6 |
+| 5 | OFRSupple | 8 |
+| 10 | PSQF_single | 1 |
+| 11 | SubSample | 3 |
+| 12 | SubSampleMultiSlice | 4 |
+| 13 | SubSampleMulti_opt | 5 |
+| 14 | Supple_parallel | 7 |
+
+Modes 6–9 are unused and rejected. Use the new numbers in both
+`run_experiments.py` and `Application/application`; old numbers are not aliases.
+Algorithm names, result filenames and existing CSV data remain unchanged.
 
 ### `k` Selection Behavior
 
-- Modes `4`, `5`, `6`, `7`, `8`, and `9`:
+- Modes `1`, `3`, `4`, `5`, `12`, `13`, and `14`:
     - `k-select=1`: use derived `k = max(1, int(1/p))`
     - `k-select=2`: sweep values from `--k`
 - Mode `2`: always uses `k = max(1, int(1/p))`
-- Modes `1` and `3`: fixed `k = 1`
+- Modes `10` and `11`: fixed `k = 1`
+- Mode `14` also accepts `--threads` for parallel execution.
 
 ------------------------------------------------------------------------
 
@@ -154,11 +163,15 @@ Each mode writes to one CSV file:
 - `<RESULTS_FOLDER>/Supple_parallel.csv`
 - `<RESULTS_FOLDER>/OFRSupple.csv`
 - `<RESULTS_FOLDER>/ShuffleBasedSWO.csv`
+- `<RESULTS_FOLDER>/CompactionBasedSWO.csv`
 
-Modes `2`, `6`, `8`, and `9` write the column names on the first line and
+Modes `1`, `2`, `3`, `4`, and `5` write the column names on the first line and
 leave one blank line between separate executions of `run_experiments.py`.
-Existing headerless files for these modes receive the header when the next
-execution appends results. Other modes retain their existing headerless format.
+Existing headerless files and files with a `heap_est_mb` header are preserved as
+`<mode>.heap_est_backup.csv` before a new result file is started; collisions
+use `.heap_est_backup.1.csv`, `.2.csv`, etc. Backups are never overwritten.
+`--overwrite` keeps its explicit replacement behavior. Other modes retain
+their existing headerless format and estimated-memory metric.
 
 
 ## 3.1 Common Prefix Columns
@@ -167,30 +180,74 @@ All modes start with:
 
 `block_size, p, n, k, ...`
 
-## 3.2 Mode 1/2/3
+## 3.2 Modes 2/10/11
 
 Columns:
 
 `block_size, p, n, k, ecall_time, ptime, oswaps, heap_est_mb`
 
 Mode `2` uses `ecall_time_ms` and `ptime_ms` in its CSV header.
+Its final column is `algorithm_heap_peak_mib` instead of `heap_est_mb`.
 
-## 3.3 Mode 4/5/6/7/8/9
+## 3.3 Modes 1/3/4/5/12/13/14
 
 Columns:
 
 `block_size, p, n, k, ecall_time, ptime, gen_perm(offline), apply_perm(online), oswaps, heap_est_mb`
 
-Modes `6`, `8`, and `9` use `ecall_time_ms`, `ptime_ms`,
+Modes `1`, `3`, `4`, and `5` use `ecall_time_ms`, `ptime_ms`,
 `gen_perm_offline_ms`, and `apply_perm_online_ms` in their CSV headers.
+Their final column is `algorithm_heap_peak_mib` instead of `heap_est_mb`.
 
-Mode `9` has no offline phase: `gen_perm=0` and `apply_perm=ptime`. Use `k=1`
+Mode `1` has no offline phase: `gen_perm=0` and `apply_perm=ptime`. Use `k=1`
 for a single sample and `k>1` for repeated shuffle-and-truncate sampling.
+
+Mode `3` reuses `markGen` and Supple's serial `TightCompact_v2`. Each round
+selects exactly `m` records, compacts all `n` records in place, and copies the
+first `m` to that sample's output; there is no additional shuffle. Marks use
+one reusable `bool[n]` buffer. Samples use fresh randomness and may overlap,
+while each sample contains no duplicate records. Compaction determines the
+output order. `gen_perm_offline_ms` sums marking time and
+`apply_perm_online_ms` sums compaction and truncation/copy time; these phases
+alternate within the `k` iterations rather than running as two batch phases.
+`ptime_ms` is their sum; decryption/encryption are included in ECALL time.
+Algorithm timing uses `2*k+1` clock OCALLs, separate from the allocation
+recorder, which adds no clock calls. The default modes are `[1,2,3,4,5]`.
+
+Example:
+
+```bash
+python3 run_experiments.py --modes 3 --n 16384 --p 0.015625 --k 64 --block-sizes 16 --repeat 5 --warmup 1
+```
+
+Compaction baseline regression tests: `bash tests/compaction/run_tests.sh`.
+SGX SIM tests including mode 3: `bash tests/memory/run_sgx_tests.sh`.
 
 Where:
 
 - `heap_est_mb` is the estimated heap size (MB) used to patch `Enclave.config.xml`
-    before each run.
+    before each run, retained in the CSV only for modes 10/11/12/13/14.
+- `algorithm_heap_peak_mib` (modes 1/2/3/4/5) is the maximum simultaneous live
+    requested heap bytes across successful **measured** rounds, divided by
+    1,048,576. Each round spans decryption, offline and online execution,
+    encryption, and cleanup. Warmup peaks are excluded; persistent scratch
+    allocated during warmup remains part of each measured round's baseline.
+    The counter includes STL capacity (and expansion overlap), plaintext
+    input/output, workspaces, PRB, and dynamic allocations in called SDK code.
+    It excludes host buffers, enclave initialization, stacks, allocator
+    metadata/fragmentation, and the recorder's fixed BSS address table.
+    It describes preheated algorithm heap demand, not a minimum `HeapMaxSize`.
+
+The enclave records allocation/free events in the same execution, with no
+sampling or additional clock OCALLs. A 16,384-slot table is kept below 50%
+occupancy; ledger overflow, allocation failure, failed execution or missing
+`MEMORY,<peak_bytes>` output prevents writing a normal result and makes the
+experiment command fail. The heap estimate still configures the enclave and
+appears in console diagnostics. The optional offline profile's existing SGX
+heap-growth fields retain their separate meaning.
+
+Memory regression tests: `bash tests/memory/run_tests.sh`. See
+`tests/memory/README.md` for SGX integration and overhead measurements.
 
 ------------------------------------------------------------------------
 

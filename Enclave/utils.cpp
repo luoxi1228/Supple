@@ -1,5 +1,6 @@
 
 #include "utils.hpp"
+#include "MemoryProfile.hpp"
 
 PRB_buffer* PRB_pool;
 thread_local uint64_t PRB_rand_bits = 0;
@@ -175,15 +176,22 @@ size_t decryptBuffer_attachRTags(unsigned char *encrypted_buffer, uint64_t N, si
 
 size_t decryptBuffer(unsigned char *encrypted_buffer, uint64_t N, size_t encrypted_block_size,
       unsigned char **decrypted_buffer) {
-  
-  
+  if (encrypted_block_size <= SGX_AESGCM_IV_SIZE + SGX_AESGCM_MAC_SIZE) {
+    memory_profile::Fail();
+    return SIZE_MAX;
+  }
   size_t decrypted_block_size = encrypted_block_size - SGX_AESGCM_IV_SIZE - SGX_AESGCM_MAC_SIZE;
+  if (decrypted_block_size == 0 || N > SIZE_MAX / decrypted_block_size) {
+    memory_profile::Fail();
+    return SIZE_MAX;
+  }
   // If decrypted_buffer hasn't been allocated yet, allocate required memory to hold the decrypted
   // buffer
   if((*decrypted_buffer)==NULL){
     (*decrypted_buffer) = (unsigned char *) malloc(N * decrypted_block_size);
     if(*decrypted_buffer==NULL) {
       printf("Malloc failed in decryptBuffer for %ld bytes\n", (N*decrypted_block_size));
+      return SIZE_MAX;
     }
   }
 
@@ -199,6 +207,7 @@ size_t decryptBuffer(unsigned char *encrypted_buffer, uint64_t N, size_t encrypt
         (const sgx_aes_gcm_128bit_tag_t*)(tag_ptr));
     if (aesret != SGX_SUCCESS) {
       printf("sgx_rijndael128GCM_decrypt failure (%x)\n", aesret);
+      memory_profile::Fail();
       return -1;
     }
     
@@ -236,6 +245,7 @@ size_t encryptBuffer(unsigned char *decrypted_buffer, uint64_t N, size_t decrypt
         (sgx_aes_gcm_128bit_tag_t*)(tag_ptr));
     if (aesret != SGX_SUCCESS) {
       printf("sgx_rijndael128GCM_encrypt failure (%x)\n", aesret);
+      memory_profile::Fail();
       return -1;
     }
     dec_buf_ptr+=decrypted_block_size;

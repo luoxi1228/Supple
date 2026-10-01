@@ -1,4 +1,5 @@
 #include "SuppleSWO.hpp"
+#include "../../MemoryProfile.hpp"
 #ifndef BEFTS_MODE
 #include "../../ObliviousPrimitives.hpp"
 #include "../../utils.hpp"
@@ -296,16 +297,13 @@ extern "C" void DecSuppleSWO(unsigned char *encrypted_buffer,
     enc_ret *ret)
 {
   using namespace swo_detail;
+  if (ret == nullptr) return;
+  memory_profile::Scope memory(ret);
+  if (encrypted_buffer == nullptr || N == 0) return;
   unsigned char *decrypted_buffer = NULL;
   const size_t decrypted_block_size =
       decryptBuffer(encrypted_buffer, static_cast<uint64_t>(N),
                     encrypted_block_size, &decrypted_buffer);
-
-  if (ret == nullptr)
-  {
-    free(decrypted_buffer);
-    return;
-  }
 
   ret->ptime = 0.0;
   ret->gen_perm_time = 0.0;
@@ -405,8 +403,9 @@ extern "C" void DecSuppleSWO(unsigned char *encrypted_buffer,
 
   if (result.next_pos == control_bits && result.written_blocks == total_blocks)
   {
-    encryptBuffer(plain_result.data(), static_cast<uint64_t>(total_blocks),
-                  decrypted_block_size, encrypt_result_buffer);
+    if (encryptBuffer(plain_result.data(), static_cast<uint64_t>(total_blocks),
+                      decrypted_block_size, encrypt_result_buffer) != SIZE_MAX)
+      memory.Complete();
   }
 
   PRB_pool_shutdown();

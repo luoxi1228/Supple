@@ -1,4 +1,5 @@
 #include "PSQF_SWO.hpp"
+#include "../../MemoryProfile.hpp"
 #include "../../ObliviousPrimitives.hpp"
 #include "../../ORShuffle/RecursiveShuffle.hpp"
 #include <cstring>
@@ -239,8 +240,16 @@ void PSQF_SWO(unsigned char *buffer, size_t N, size_t M, size_t block_size, unsi
 }
 
 void DecPSQF_SWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t encrypted_block_size, unsigned char *encryt_result_buffer, enc_ret *ret){
+    if (ret == nullptr) return;
+    memory_profile::Scope memory(ret);
+    if (encrypted_buffer == nullptr || encryt_result_buffer == nullptr || N == 0)
+        return;
     unsigned char *decrypted_buffer = NULL;
     size_t decrypted_block_size = decryptBuffer(encrypted_buffer, (uint64_t) N, encrypted_block_size, &decrypted_buffer);
+    if (decrypted_buffer == nullptr || decrypted_block_size == SIZE_MAX) {
+        free(decrypted_buffer);
+        return;
+    }
 
     if (M > N) {
         M = N;
@@ -259,4 +268,5 @@ void DecPSQF_SWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t enc
     PRB_pool_shutdown();
 
     free(decrypted_buffer);
+    memory.Complete();
 }

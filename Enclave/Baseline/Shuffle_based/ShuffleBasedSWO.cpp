@@ -1,4 +1,5 @@
 #include "ShuffleBasedSWO.hpp"
+#include "../../MemoryProfile.hpp"
 #include "../../ORShuffle/RecursiveShuffle.hpp"
 #include "../../ObliviousPrimitives.hpp"
 #include "../../utils.hpp"
@@ -50,6 +51,7 @@ void DecShuffleBasedSWO(unsigned char *encrypted_buffer, size_t N, size_t M,
     if (ret == nullptr) {
         return;
     }
+    memory_profile::Scope memory(ret);
     ret->ptime = 0.0;
     ret->gen_perm_time = 0.0;
     ret->apply_perm_time = 0.0;
@@ -87,10 +89,11 @@ void DecShuffleBasedSWO(unsigned char *encrypted_buffer, size_t N, size_t M,
     PRB_pool_init(1);
     ShuffleBasedSWO(decrypted_buffer, N, M, K, decrypted_block_size,
                     plain_result, ret);
-    encryptBuffer(plain_result, static_cast<uint64_t>(output_blocks),
+    const size_t encrypted_width = encryptBuffer(plain_result, static_cast<uint64_t>(output_blocks),
                   decrypted_block_size, encrypted_result_buffer);
     PRB_pool_shutdown();
 
     free(plain_result);
     free(decrypted_buffer);
+    if (encrypted_width != SIZE_MAX) memory.Complete();
 }

@@ -244,6 +244,7 @@ void TightCompact(unsigned char *buf, size_t N, size_t block_size,
       selected_count = new uint32_t[N+1];
     } catch (std::bad_alloc&){
       printf("Allocating memory failed in TC\n");
+      throw;
     }
     selected_count[0] = 0;
 

@@ -51,32 +51,33 @@ void parseCommandLineArguments(int argc, char *argv[]) {
   if (argc < (NUM_ARGUMENTS_REQUIRED + 1) ||
       argc > (NUM_ARGUMENTS_REQUIRED + 4)) {
     printf("Did NOT receive the right number of command line arguments.\n"
-          "Usage: ./application <1|2|3> <N> <BLOCK_SIZE> <P> <REPEAT> [WARMUP]\n"
-          "   or: ./application <4|5|6|8|9> <N> <BLOCK_SIZE> <P> <K> <REPEAT> [WARMUP]\n"
-          "   or: ./application <7> <N> <BLOCK_SIZE> <P> <K> <NTHREADS> <REPEAT> [WARMUP]\n\n"
-           "Oblivious SubSampling (1/2/3/4/5/6/7/8/9)\n"
-          "  (1) PSQF_single (shuffle all then take first N*P)\n"
-           "  (2) PSQF_SWO (Algorithm 1)\n"
-          "  (3) SubSample (randomly select N*P items, then compact)\n"
-           "  (4) SubSampleMulti\n"
-           "  (5) SubSampleMulti_opt\n"
-           "  (6) SuppleSWO\n"
-           "  (7) SuppleSWO_parallel\n"
-           "  (8) OFRSupple\n"
-           "  (9) ShuffleBasedSWO (shuffle and truncate K times)\n");
+          "Usage: ./application <2|10|11> <N> <BLOCK_SIZE> <P> <REPEAT> [WARMUP]\n"
+          "   or: ./application <1|3|4|5|12|13> <N> <BLOCK_SIZE> <P> <K> <REPEAT> [WARMUP]\n"
+          "   or: ./application <14> <N> <BLOCK_SIZE> <P> <K> <NTHREADS> <REPEAT> [WARMUP]\n\n"
+          "Oblivious SubSampling modes:\n"
+          "  (1) ShuffleBasedSWO (shuffle and truncate K times)\n"
+          "  (2) PSQF_SWO (Algorithm 1)\n"
+          "  (3) CompactionBasedSWO (mark, compact and truncate K times)\n"
+          "  (4) SuppleSWO\n"
+          "  (5) OFRSupple\n"
+          "  (10) PSQF_single (shuffle all then take first N*P)\n"
+          "  (11) SubSample (randomly select N*P items, then compact)\n"
+          "  (12) SubSampleMulti\n"
+          "  (13) SubSampleMulti_opt\n"
+          "  (14) SuppleSWO_parallel\n");
     exit(0);
   }
 
   MODE = atoi(argv[1]);
-  if (MODE < 1 || MODE > 9) {
-    printf("MODE must be between 1 and 9.\n");
-    exit(0);
+  if (!((MODE >= 1 && MODE <= 5) || (MODE >= 10 && MODE <= 14))) {
+    printf("MODE must be one of 1,2,3,4,5,10,11,12,13,14.\n");
+    exit(1);
   }
 
-  const bool needs_k = MODE == 4 || MODE == 5 || MODE == 6 ||
-                       MODE == 8 || MODE == 9;
+  const bool needs_k = MODE == 1 || MODE == 3 || MODE == 4 ||
+                       MODE == 5 || MODE == 12 || MODE == 13;
   const int expected_argc = NUM_ARGUMENTS_REQUIRED + 1 +
-                            (needs_k ? 1 : 0) + (MODE == 7 ? 2 : 0);
+                            (needs_k ? 1 : 0) + (MODE == 14 ? 2 : 0);
   if (argc != expected_argc && argc != expected_argc + 1) {
     printf("Incorrect argument count for MODE %u.\n", MODE);
     exit(1);
@@ -97,7 +98,7 @@ void parseCommandLineArguments(int argc, char *argv[]) {
   if (needs_k) {
     K = atoi(argv[5]);
     requested_repeat = atoi(argv[6]);
-  } else if (MODE == 7) {
+  } else if (MODE == 14) {
     K = atoi(argv[5]);
     NTHREADS = atoi(argv[6]);
     requested_repeat = atoi(argv[7]);
@@ -127,12 +128,12 @@ void parseCommandLineArguments(int argc, char *argv[]) {
     exit(1);
   }
   TOTAL_ROUNDS = WARMUP + REPEAT;
-  if ((MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8 || MODE == 9) && K == 0) {
-    printf("MODE 4/5/6/7/8/9 expects K > 0\n");
-    exit(0);
+  if ((MODE == 1 || MODE == 3 || MODE == 4 || MODE == 5 || MODE == 12 || MODE == 13 || MODE == 14) && K == 0) {
+    printf("MODE 1/3/4/5/12/13/14 expects K > 0\n");
+    exit(1);
   }
-  if (MODE == 7 && NTHREADS == 0) {
-    printf("MODE 7 expects NTHREADS > 0\n");
+  if (MODE == 14 && NTHREADS == 0) {
+    printf("MODE 14 expects NTHREADS > 0\n");
     exit(0);
   }
 }
@@ -189,6 +190,8 @@ int main(int argc, char *argv[]) {
   double offline_phase_array[9][TOTAL_ROUNDS] = {};
   size_t offline_heap_peak_bytes = 0;
   size_t total_heap_peak_bytes = 0;
+  size_t algorithm_heap_peak_bytes = 0;
+  const bool profile_memory = MODE >= 1 && MODE <= 5;
   size_t num_oswaps[TOTAL_ROUNDS] = {};
 
   OpenSSL_add_all_algorithms();   // Initialize libcrypto
@@ -247,7 +250,7 @@ int main(int argc, char *argv[]) {
 
   // Create buffer of items to shuffle
   size_t output_blocks = N;
-  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8 || MODE == 9) {
+  if (MODE == 1 || MODE == 3 || MODE == 4 || MODE == 5 || MODE == 12 || MODE == 13 || MODE == 14) {
     output_blocks = SampleSize * K;
   }
   size_t total_blocks = (output_blocks > N) ? output_blocks : N;
@@ -332,19 +335,21 @@ int main(int argc, char *argv[]) {
     process_start = rtclock();
 
     enc_ret ret{};
-    ret.collect_online_profile = profile_online && (MODE == 6 || MODE == 8);
-    ret.collect_offline_profile = profile_offline && (MODE == 6 || MODE == 8);
+    ret.collect_online_profile = profile_online && (MODE == 4 || MODE == 5);
+    ret.collect_offline_profile = profile_offline && (MODE == 4 || MODE == 5);
+    ret.collect_memory_profile = profile_memory;
     switch (MODE) {
       case 1:
-        DecPSQF_single(buf, N, SampleSize, ENC_BLOCK_SIZE, buf, &ret);
+        DecShuffleBasedSWO(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
         ptime_array[r] = ret.ptime;
+        gen_perm_time_array[r] = ret.gen_perm_time;
+        apply_perm_time_array[r] = ret.apply_perm_time;
 #ifdef COUNT_OSWAPS
         num_oswaps[r] = ret.OSWAP_count;
 #else
         num_oswaps[r] = 0;
 #endif
         break;
-
       case 2:
         DecPSQF_SWO(buf, N, SampleSize, ENC_BLOCK_SIZE, buf, &ret);
         ptime_array[r] = ret.ptime;
@@ -354,42 +359,18 @@ int main(int argc, char *argv[]) {
         num_oswaps[r] = 0;
 #endif
         break;
-
       case 3:
-        decryptAndSubSample(buf, N, SampleSize, ENC_BLOCK_SIZE, buf, &ret);
+        DecCompactionBasedSWO(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
         ptime_array[r] = ret.ptime;
+        gen_perm_time_array[r] = ret.gen_perm_time;
+        apply_perm_time_array[r] = ret.apply_perm_time;
 #ifdef COUNT_OSWAPS
         num_oswaps[r] = ret.OSWAP_count;
 #else
         num_oswaps[r] = 0;
 #endif
         break;
-
       case 4:
-        decryptAndSubSampleMulti(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
-        ptime_array[r] = ret.ptime;
-        gen_perm_time_array[r] = ret.gen_perm_time;
-        apply_perm_time_array[r] = ret.apply_perm_time;
-      #ifdef COUNT_OSWAPS
-        num_oswaps[r] = ret.OSWAP_count;
-      #else
-        num_oswaps[r] = 0;
-      #endif
-        break;
-
-      case 5:
-        decryptAndSubSampleMulti_opt(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
-        ptime_array[r] = ret.ptime;
-        gen_perm_time_array[r] = ret.gen_perm_time;
-        apply_perm_time_array[r] = ret.apply_perm_time;
-      #ifdef COUNT_OSWAPS
-        num_oswaps[r] = ret.OSWAP_count;
-      #else
-        num_oswaps[r] = 0;
-      #endif
-        break;
-
-      case 6:
         DecSuppleSWO(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
         ptime_array[r] = ret.ptime;
         gen_perm_time_array[r] = ret.gen_perm_time;
@@ -404,20 +385,7 @@ int main(int argc, char *argv[]) {
         num_oswaps[r] = 0;
       #endif
         break;
-
-      case 7:
-        DecSuppleSWO_parallel(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret, NTHREADS);
-        ptime_array[r] = ret.ptime;
-        gen_perm_time_array[r] = ret.gen_perm_time;
-        apply_perm_time_array[r] = ret.apply_perm_time;
-      #ifdef COUNT_OSWAPS
-        num_oswaps[r] = ret.OSWAP_count;
-      #else
-        num_oswaps[r] = 0;
-      #endif
-        break;
-
-      case 8:
+      case 5:
         DecOFRSupple(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
         ptime_array[r] = ret.ptime;
         gen_perm_time_array[r] = ret.gen_perm_time;
@@ -432,20 +400,69 @@ int main(int argc, char *argv[]) {
         num_oswaps[r] = 0;
       #endif
         break;
-
-      case 9:
-        DecShuffleBasedSWO(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
+      case 10:
+        DecPSQF_single(buf, N, SampleSize, ENC_BLOCK_SIZE, buf, &ret);
         ptime_array[r] = ret.ptime;
-        gen_perm_time_array[r] = ret.gen_perm_time;
-        apply_perm_time_array[r] = ret.apply_perm_time;
 #ifdef COUNT_OSWAPS
         num_oswaps[r] = ret.OSWAP_count;
 #else
         num_oswaps[r] = 0;
 #endif
         break;
+      case 11:
+        decryptAndSubSample(buf, N, SampleSize, ENC_BLOCK_SIZE, buf, &ret);
+        ptime_array[r] = ret.ptime;
+#ifdef COUNT_OSWAPS
+        num_oswaps[r] = ret.OSWAP_count;
+#else
+        num_oswaps[r] = 0;
+#endif
+        break;
+      case 12:
+        decryptAndSubSampleMulti(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
+        ptime_array[r] = ret.ptime;
+        gen_perm_time_array[r] = ret.gen_perm_time;
+        apply_perm_time_array[r] = ret.apply_perm_time;
+      #ifdef COUNT_OSWAPS
+        num_oswaps[r] = ret.OSWAP_count;
+      #else
+        num_oswaps[r] = 0;
+      #endif
+        break;
+      case 13:
+        decryptAndSubSampleMulti_opt(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
+        ptime_array[r] = ret.ptime;
+        gen_perm_time_array[r] = ret.gen_perm_time;
+        apply_perm_time_array[r] = ret.apply_perm_time;
+      #ifdef COUNT_OSWAPS
+        num_oswaps[r] = ret.OSWAP_count;
+      #else
+        num_oswaps[r] = 0;
+      #endif
+        break;
+      case 14:
+        DecSuppleSWO_parallel(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret, NTHREADS);
+        ptime_array[r] = ret.ptime;
+        gen_perm_time_array[r] = ret.gen_perm_time;
+        apply_perm_time_array[r] = ret.apply_perm_time;
+      #ifdef COUNT_OSWAPS
+        num_oswaps[r] = ret.OSWAP_count;
+      #else
+        num_oswaps[r] = 0;
+      #endif
+        break;
     }
     process_stop = rtclock();
+
+    if (profile_memory) {
+      if (ret.memory_profile_status != MEMORY_PROFILE_VALID) {
+        fprintf(stderr, "Algorithm heap measurement failed in round %zu (mode %u)\n", r, MODE);
+        return 1;
+      }
+      if (r >= WARMUP)
+        algorithm_heap_peak_bytes = std::max(algorithm_heap_peak_bytes,
+                                            ret.algorithm_heap_peak_bytes);
+    }
 
     if (ret.collect_offline_profile) {
       const double phases[9] = {
@@ -479,9 +496,9 @@ int main(int argc, char *argv[]) {
     int cnum = 0;
 
     size_t output_blocks = N;
-    if (MODE == 1 || MODE == 3) {
+    if (MODE == 10 || MODE == 11) {
       output_blocks = SampleSize;
-    } else if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8 || MODE == 9) {
+    } else if (MODE == 1 || MODE == 3 || MODE == 4 || MODE == 5 || MODE == 12 || MODE == 13 || MODE == 14) {
       output_blocks = SampleSize * K;
     }
     unsigned char *decrypted_result_buf_ptr = buf;
@@ -512,7 +529,7 @@ int main(int argc, char *argv[]) {
       decrypted_result_buf_ptr += BLOCK_SIZE;
     }
     if (dec_fail_flag) {
-      exit(0);
+      exit(1);
     }
 
     phase_end = rtclock();
@@ -530,7 +547,7 @@ int main(int argc, char *argv[]) {
   printf("%f\n", ecallTime_average);
   printf("%f\n", ptime_average);
 
-  if (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7 || MODE == 8 || MODE == 9) {
+  if (MODE == 1 || MODE == 3 || MODE == 4 || MODE == 5 || MODE == 12 || MODE == 13 || MODE == 14) {
     double gen_perm_time_average = calculateAve(gen_perm_time_array + WARMUP, REPEAT);
     double apply_perm_time_average = calculateAve(apply_perm_time_array + WARMUP, REPEAT);
     printf("%f\n", gen_perm_time_average);
@@ -538,7 +555,9 @@ int main(int argc, char *argv[]) {
   }
   // Some legacy modes report a cumulative swap counter, so keep round zero.
   printf("%ld\n", num_oswaps[0]);
-  if (profile_online && (MODE == 6 || MODE == 8)) {
+  if (profile_memory)
+    printf("MEMORY,%zu\n", algorithm_heap_peak_bytes);
+  if (profile_online && (MODE == 4 || MODE == 5)) {
     const double route = calculateAve(online_route_array + WARMUP, REPEAT);
     const double reorder = calculateAve(online_reorder_array + WARMUP, REPEAT);
     const double copy = calculateAve(online_copy_array + WARMUP, REPEAT);
@@ -547,7 +566,7 @@ int main(int argc, char *argv[]) {
     printf("PROFILE,%f,%f,%f,%f,%f\n", route, reorder, copy, shuffle,
            online - route - reorder - copy - shuffle);
   }
-  if (profile_offline && (MODE == 6 || MODE == 8)) {
+  if (profile_offline && (MODE == 4 || MODE == 5)) {
     double phases[9] = {};
     double measured = 0.0;
     for (size_t phase = 0; phase < 9; ++phase) {

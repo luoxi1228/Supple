@@ -1,4 +1,5 @@
 #include "OFRSupple.hpp"
+#include "../../MemoryProfile.hpp"
 
 #include "../OFR/OFR.hpp"
 #include "../SWO/SuppleSWO.hpp"
@@ -535,14 +536,12 @@ extern "C" void DecOFRSupple(unsigned char *encrypted_buffer,
     size_t N, size_t M, size_t K, size_t encrypted_block_size,
     unsigned char *encrypt_result_buffer, enc_ret *ret)
 {
+  if (ret == nullptr) return;
+  memory_profile::Scope memory(ret);
+  if (encrypted_buffer == nullptr || N == 0) return;
   unsigned char *decrypted = nullptr;
   const size_t width = decryptBuffer(encrypted_buffer,
       static_cast<uint64_t>(N), encrypted_block_size, &decrypted);
-  if (ret == nullptr)
-  {
-    free(decrypted);
-    return;
-  }
   ret->ptime = ret->gen_perm_time = ret->apply_perm_time = 0.0;
   ret->online_route_ms = ret->online_reorder_ms = 0.0;
   ret->online_copy_ms = ret->online_shuffle_ms = 0.0;
@@ -614,9 +613,10 @@ extern "C" void DecOFRSupple(unsigned char *encrypted_buffer,
 #ifdef COUNT_OSWAPS
     ret->OSWAP_count = OSWAP_COUNTER - initial_oswaps;
 #endif
-    encryptBuffer(const_cast<unsigned char *>(plain.data()),
+    if (encryptBuffer(const_cast<unsigned char *>(plain.data()),
                   static_cast<uint64_t>(blocks), width,
-                  encrypt_result_buffer);
+                  encrypt_result_buffer) != SIZE_MAX)
+      memory.Complete();
   }
   catch (const std::exception &)
   {

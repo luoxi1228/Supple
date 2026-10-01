@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 
 # Base template. Edit these defaults as needed.
 BASE_CONFIG: Dict[str, Any] = {
-    "modes": [1,2,3,4,5,6],
+    "modes": [10,2,11,12,13,4],
     "p": [0.0078125],
     "n": [1048576],
     "k": [896],
@@ -23,7 +23,7 @@ BASE_CONFIG: Dict[str, Any] = {
 EXPERIMENT_GROUPS: List[Dict[str, Any]] = [
     {
         "name": "group_p",
-        "modes": [1,2,3,4,5,6],
+        "modes": [10,2,11,12,13,4],
         "p": [0.25, 0.0625, 0.015625, 0.00390625, 0.0009765625], # 1/4 to 1/1024
         "n": [1048576],
         "k": [1],
@@ -34,7 +34,7 @@ EXPERIMENT_GROUPS: List[Dict[str, Any]] = [
         "overwrite": False,
     },{
         "name": "group_k",
-        "modes": [1,2,3,4,5,6],
+        "modes": [10,2,11,12,13,4],
         "p": [0.015625],
         "n": [1048576],
         "k": [4,16,64,256,1024],   # 4 to 1024
@@ -45,7 +45,7 @@ EXPERIMENT_GROUPS: List[Dict[str, Any]] = [
         "overwrite": False,
     },{
         "name": "group_b",
-        "modes": [1,2,3,4,5,6],
+        "modes": [10,2,11,12,13,4],
         "p": [0.015625],
         "n": [1048576],
         "k": [1],
@@ -56,7 +56,7 @@ EXPERIMENT_GROUPS: List[Dict[str, Any]] = [
         "overwrite": False,
     },{
         "name": "group_n",
-        "modes": [1,2,3,4,5,6],
+        "modes": [10,2,11,12,13,4],
         "p": [0.015625],
         "n": [1048576, 4194304, 16777216, 67108864, 268435456], # 1M to 256M
         "k": [1],

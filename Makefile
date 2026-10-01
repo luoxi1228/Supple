@@ -133,10 +133,11 @@ endif
 Crypto_Library_Name := sgx_tcrypto
 SGXSSL_INCLUDE_PATH := /opt/intel/sgxssl/include/
 
-Enclave_Cpp_Files := Enclave/Enclave.cpp Enclave/utils.cpp Enclave/ORShuffle/RecursiveShuffle.cpp \
+Enclave_Cpp_Files := Enclave/Enclave.cpp Enclave/utils.cpp Enclave/MemoryProfile.cpp Enclave/ORShuffle/RecursiveShuffle.cpp \
 		Enclave/ObliviousPrimitives.cpp Enclave/ORCompaction/TightCompaction.cpp Enclave/ORCompaction/TightCompaction_v2.cpp \
 		Enclave/SubSample/SubSample.cpp Enclave/Baseline/SWO/PSQF_SWO.cpp \
 		Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.cpp \
+		Enclave/Baseline/Compaction_based/CompactionBasedSWO.cpp \
 		Enclave/SubSample_v2/SWO/SuppleSWO.cpp Enclave/SubSample_v2/SWO/helper.cpp \
 		Enclave/SubSample_v2/OFR/OFR.cpp Enclave/SubSample_v2/OFR/helper.cpp Enclave/SubSample_v2/OFR/OFRBenchmark.cpp \
 		Enclave/SubSample_v2/OFRSupple/OFRSupple.cpp \
@@ -148,6 +149,13 @@ Enclave_Include_Paths := -IInclude -IEnclave -I$(SGX_SDK)/include -I$(SGX_SDK)/i
 
 Enclave_C_Flags := $(SGX_COMMON_CFLAGS) -nostdinc -fvisibility=hidden -fpie -fstack-protector $(Enclave_Include_Paths)
 Enclave_Cpp_Flags := $(Enclave_C_Flags) -std=c++11 -nostdinc++
+# Set to 0 only for a separately rebuilt performance baseline. Normal result
+# collection requires the tracker, and fails closed if it is unavailable.
+MEMORY_TRACKING ?= 1
+ifeq ($(MEMORY_TRACKING),1)
+Enclave_Cpp_Flags += -DSUPPLE_MEMORY_TRACKING
+Memory_Wrap_Flags := $(foreach symbol,malloc calloc realloc free memalign posix_memalign aligned_alloc,-Wl,--wrap=$(symbol))
+endif
 SgxSSL_Link_Libraries := -L$(OPENSSL_LIBRARY_PATH) -Wl,--whole-archive -l$(SGXSSL_Library_Name) -Wl,--no-whole-archive \
 
 # To generate a proper enclave, it is recommended to follow below guideline to link the trusted libraries:
@@ -163,7 +171,7 @@ Enclave_Link_Flags := $(SGX_COMMON_CFLAGS) -Wl,--no-undefined -nostdlib -nodefau
         -Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined \
         -Wl,-pie,-eenclave_entry -Wl,--export-dynamic  \
         -Wl,--defsym,__ImageBase=0 \
-        -Wl,--version-script=Enclave/Enclave.lds
+        -Wl,--version-script=Enclave/Enclave.lds $(Memory_Wrap_Flags)
 
 
 Enclave_Cpp_Objects := $(Enclave_Cpp_Files:.cpp=.o)
@@ -219,6 +227,8 @@ endif
 
 # enc_ret is shared across the generated ECALL bridge and both C++ sides.
 $(App_Cpp_Objects) $(Enclave_Cpp_Objects) Untrusted/Enclave_u.o Enclave/Enclave_t.o: Globals.hpp
+$(Enclave_Cpp_Objects): Enclave/MemoryProfile.hpp
+$(Enclave_Cpp_Objects): Enclave/Enclave_t.c
 
 run: all
 ifneq ($(Build_Mode), HW_RELEASE)
@@ -228,7 +238,7 @@ endif
 
 ######## App Objects ########
 
-Untrusted/Enclave_u.c: $(SGX_EDGER8R) Enclave/Enclave.edl Enclave/Baseline/SWO/PSQF_SWO.edl Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.edl
+Untrusted/Enclave_u.c: $(SGX_EDGER8R) Enclave/Enclave.edl Enclave/Baseline/SWO/PSQF_SWO.edl Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.edl Enclave/Baseline/Compaction_based/CompactionBasedSWO.edl
 	@cd Untrusted && $(SGX_EDGER8R) --untrusted ../Enclave/Enclave.edl --search-path ../Enclave --search-path $(SGX_SDK)/include
 	@echo "GEN  =>  $@"
 
@@ -253,7 +263,7 @@ $(App_Name): Untrusted/Enclave_u.o $(App_Cpp_Objects)
 
 ######## Enclave Objects ########
 
-Enclave/Enclave_t.c: $(SGX_EDGER8R) Enclave/Enclave.edl Enclave/Baseline/SWO/PSQF_SWO.edl Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.edl
+Enclave/Enclave_t.c: $(SGX_EDGER8R) Enclave/Enclave.edl Enclave/Baseline/SWO/PSQF_SWO.edl Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.edl Enclave/Baseline/Compaction_based/CompactionBasedSWO.edl
 	@cd Enclave && $(SGX_EDGER8R) --trusted ../Enclave/Enclave.edl --search-path ../Enclave --search-path $(SGX_SDK)/include
 	@echo "GEN  =>  $@"
 
@@ -268,6 +278,9 @@ Enclave/oblivious_functions.o: Enclave/oblivious_functions.asm
 Enclave/%.o: Enclave/%.cpp $(Enclave_Asm_Objects)
 	@$(CXX) $(Enclave_Cpp_Flags) -c $< -o $@
 	@echo "CXX  <=  $<"
+
+Enclave/Baseline/Compaction_based/CompactionBasedSWO.o: Enclave/Baseline/Compaction_based/CompactionBasedSWO.hpp Enclave/SubSample/SubSample.hpp
+Enclave/ObliviousPrimitives.o: Enclave/ORCompaction/TightCompaction_v2.hpp Enclave/ORCompaction/TightCompaction_v2.tcc
 
 Enclave/asm/%.s: Enclave/%.cpp $(Enclave_Asm_Objects)
 	@mkdir -p $$(dirname $@)

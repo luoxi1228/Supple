@@ -58,6 +58,7 @@ enclave {
     from "SubSample/SubSample.edl" import *;
     from "Baseline/SWO/PSQF_SWO.edl" import *;
     from "Baseline/Shuffle_based/ShuffleBasedSWO.edl" import *;
+    from "Baseline/Compaction_based/CompactionBasedSWO.edl" import *;
     from "SubSample_v2/SWO/SuppleSWO.edl" import *;
     from "SubSample_v2_Par/SuppleSWO_parallel.edl" import *;
     from "SubSample_v2/OFR/OFR.edl" import *;

@@ -484,6 +484,12 @@ void DecSuppleSWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K,
   DecSuppleSWO(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret);
 }
 
+void DecCompactionBasedSWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K,
+  size_t encrypted_block_size, unsigned char *encrypted_result_buffer, enc_ret *ret) {
+  DecCompactionBasedSWO(global_eid, encrypted_buffer, N, M, K, encrypted_block_size,
+                       encrypted_result_buffer, ret);
+}
+
 void DecSuppleSWO_parallel(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size,
   unsigned char *encrypt_result_buffer, enc_ret *ret, size_t nthreads) {
   DecSuppleSWO_parallel(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret, nthreads);

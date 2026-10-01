@@ -62,6 +62,12 @@ Global Flags will sit in CONFIG.h
     size_t num_packets_in_outbuf_bucket;
   }node_params;
 
+  enum memory_profile_status {
+    MEMORY_PROFILE_UNAVAILABLE = 0,
+    MEMORY_PROFILE_VALID = 1,
+    MEMORY_PROFILE_INVALID = 2
+  };
+
   typedef struct enclave_returns{
     size_t OSWAP_count;
     double ptime;
@@ -101,6 +107,12 @@ Global Flags will sit in CONFIG.h
     double offline_prepare_ms;
     size_t offline_heap_peak_bytes;
     size_t total_heap_peak_bytes;
+
+    // Live requested heap bytes during one complete algorithm ECALL.
+    // Independent of clocks and SGX's process-lifetime heap growth metric.
+    int collect_memory_profile;
+    size_t algorithm_heap_peak_bytes;
+    int memory_profile_status;
   }enc_ret;
 
   #define __GLOBALS__
