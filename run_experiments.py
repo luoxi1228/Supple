@@ -16,34 +16,14 @@ ENCLAVE_CONFIG = PROJECT_DIR / "Enclave" / "Enclave.config.xml"
 DEFAULT_RESULTS_FOLDER = "RESULTS"
 
 
-def available_cpu_count():
-  affinity = None
-  try:
-    affinity = sorted(os.sched_getaffinity(0))
-  except (AttributeError, OSError):
-    affinity = list(range(max(1, int(os.cpu_count() or 1))))
-
-  physical_cores = set()
-  for cpu in affinity:
-    topology = Path(f"/sys/devices/system/cpu/cpu{cpu}/topology")
-    try:
-      package_id = (topology / "physical_package_id").read_text().strip()
-      core_id = (topology / "core_id").read_text().strip()
-      physical_cores.add((package_id, core_id))
-    except OSError:
-      return max(1, len(affinity))
-  return max(1, len(physical_cores))
-
-
-DEFAULT_MODE = [4,5]
+DEFAULT_MODE = [1,2,3,4,5,6]
 DEFAULT_P = [0.015625]
-DEFAULT_N = [1048576]
+DEFAULT_N = [65536, 262144, 1048576]
 DEFAULT_K = [64]
 DEFAULT_K_SELECT = 2   # 1 => k = 1/p, 2 => use --k list
 DEFAULT_BLOCK_SIZE = [16]
 DEFAULT_REPEAT = 5
 DEFAULT_WARMUP = 1
-DEFAULT_THREADS = 1 #available_cpu_count()
 
 BASE_HEAP = 1000000
 SIZE_T_BYTES = int(os.getenv("SIZE_T_BYTES", "8"))
@@ -53,17 +33,17 @@ MODE_INFO = {
   1: {"name": "ShuffleBasedSWO", "needs_k": True, "detailed": True, "fixed_k": False},
   2: {"name": "PSQF_SWO", "needs_k": False, "detailed": False, "fixed_k": False},
   3: {"name": "CompactionBasedSWO", "needs_k": True, "detailed": True, "fixed_k": False},
-  4: {"name": "Supple", "needs_k": True, "detailed": True, "fixed_k": False},
-  5: {"name": "OFRSupple", "needs_k": True, "detailed": True, "fixed_k": False},
+  4: {"name": "FFOS_C", "needs_k": True, "detailed": True, "fixed_k": False},
+  5: {"name": "FFOS_FR", "needs_k": True, "detailed": True, "fixed_k": False},
+  6: {"name": "FFOS_FR_Opt", "needs_k": True, "detailed": True, "fixed_k": False},
 
   10: {"name": "PSQF_single", "needs_k": False, "detailed": False, "fixed_k": True},
   11: {"name": "SubSample", "needs_k": False, "detailed": False, "fixed_k": True},
   12: {"name": "SubSampleMultiSlice", "needs_k": True, "detailed": True, "fixed_k": False},
   13: {"name": "SubSampleMulti_opt", "needs_k": True, "detailed": True, "fixed_k": False},
-  14: {"name": "Supple_parallel", "needs_k": True, "detailed": True, "fixed_k": False},
 }
 
-CSV_HEADER_MODES = {1, 2, 3, 4, 5}
+CSV_HEADER_MODES = {1, 2, 3, 4, 5, 6}
 CSV_COMMON_FIELDS = ("block_size", "p", "n", "k", "ecall_time_ms", "ptime_ms")
 CSV_DETAILED_FIELDS = ("gen_perm_offline_ms", "apply_perm_online_ms")
 CSV_TRAILING_FIELDS = ("oswaps", "heap_est_mb")
@@ -100,9 +80,9 @@ def parse_args():
   parser.add_argument("--modes", default=",".join(map(str, DEFAULT_MODE)), help="Comma-separated modes, e.g. 3,4")
   parser.add_argument("--n", default=",".join(map(str, DEFAULT_N)), help="Comma-separated N values")
   parser.add_argument("--p", default=",".join(map(str, DEFAULT_P)), help="Comma-separated P values (0 < P <= 1)")
-  parser.add_argument("--k", default=",".join(map(str, DEFAULT_K)), help="Comma-separated K values (used by modes 1/3/4/5/12/13/14)")
+  parser.add_argument("--k", default=",".join(map(str, DEFAULT_K)), help="Comma-separated K values (used by modes 1/3/4/5/6/12/13)")
   parser.add_argument("--k-select", type=int, choices=[1, 2], default=DEFAULT_K_SELECT,
-                      help="Modes 1/3/4/5/12/13/14 K selection: 1 => k=1/p, 2 => use --k list")
+                      help="Modes 1/3/4/5/6/12/13 K selection: 1 => k=1/p, 2 => use --k list")
   parser.add_argument("--block-sizes", default=",".join(map(str, DEFAULT_BLOCK_SIZE)), help="Comma-separated block sizes")
   parser.add_argument(
     "--repeat", type=int, default=DEFAULT_REPEAT,
@@ -110,16 +90,15 @@ def parse_args():
   )
   parser.add_argument("--warmup", type=int, default=DEFAULT_WARMUP,
                       help="Number of warm-up rounds excluded from the average")
-  parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="Thread count for mode 14")
   parser.add_argument("--results-folder", default=DEFAULT_RESULTS_FOLDER, help="Results folder path")
   parser.add_argument("--overwrite", action="store_true", help="Overwrite each mode CSV on first write")
   offline_group = parser.add_mutually_exclusive_group()
   offline_group.add_argument("--offline-profile", dest="offline_profile",
                              action="store_true",
-                             help="Collect offline phase timings and enclave heap high-water marks for modes 4 and 5 (adds timing overhead)")
+                             help="Collect offline phase timings and enclave heap high-water marks for modes 4, 5 and 6 (adds timing overhead)")
   offline_group.add_argument("--no-offline-profile", dest="offline_profile",
                              action="store_false",
-                             help="Skip offline profiling for modes 4 and 5")
+                             help="Skip offline profiling for modes 4, 5 and 6")
   parser.set_defaults(offline_profile=False)
   return parser.parse_args()
 
@@ -131,13 +110,6 @@ def sample_size(n, sample_prob):
 
 def derived_k(n, m):
   return max(1, int(n / m)) if m > 0 else 1
-
-
-def swo_effective_threads(n, m, k, requested_threads):
-  effective = min(max(1, int(requested_threads)), max(1, int(k)))
-  if effective <= 1 or k <= 1 or n < 4096:
-    return 1
-  return effective
 
 
 def node_num(n, m, k):
@@ -176,8 +148,8 @@ def ofr_control_words(n, n_left, n_right):
           ofr_control_words(n // 2, bottom_left, bottom_right))
 
 
-def ofrsupple_frontier(n, m, k):
-  """Mirror SWOFrontier's balanced groups at most floor(n/m) samples."""
+def ffos_fr_frontier(n, m, k):
+  """Mirror FFOS_CFrontier's balanced groups at most floor(n/m) samples."""
   maximum = n // m
   node_count = (k + maximum - 1) // maximum
   base_count, larger_nodes = divmod(k, node_count)
@@ -190,9 +162,9 @@ def ofrsupple_frontier(n, m, k):
   return tuple(nodes)
 
 
-def ofrsupple_control_counts(n, m, k):
-  """Mirror the two control counts in OFRSuppleControlCount."""
-  frontier = ofrsupple_frontier(n, m, k) if m * k > n else ()
+def ffos_fr_control_counts(n, m, k):
+  """Mirror the two control counts in FFOS_FRControlCount."""
+  frontier = ffos_fr_frontier(n, m, k) if m * k > n else ()
 
   @lru_cache(maxsize=None)
   def count_node(items, samples, nodes):
@@ -220,9 +192,9 @@ def ofrsupple_control_counts(n, m, k):
   return count_node(n, k, frontier)
 
 
-def ofrsupple_feature_scratch_bytes(n, m, k):
+def ffos_fr_feature_scratch_bytes(n, m, k):
   """Largest generic DFS layer; balanced tiled nodes need no heap scratch."""
-  frontier = ofrsupple_frontier(n, m, k) if m * k > n else ()
+  frontier = ffos_fr_frontier(n, m, k) if m * k > n else ()
 
   @lru_cache(maxsize=None)
   def scratch_node(items, samples, nodes):
@@ -245,7 +217,7 @@ def ofrsupple_feature_scratch_bytes(n, m, k):
   return scratch_node(n, k, frontier)
 
 
-def ofrsupple_workspace_sizes(n, m, k):
+def ffos_fr_workspace_sizes(n, m, k):
   """Coexisting per-depth capacity maxima in the ECALL's owned-root path.
 
   Returns offline workspace bytes, online data items, and the largest
@@ -253,7 +225,7 @@ def ofrsupple_workspace_sizes(n, m, k):
   online; tags, projections and generic features remain live by depth until
   offline finishes. Exact reserve calls prevent vector capacity doubling.
   """
-  frontier = ofrsupple_frontier(n, m, k) if m * k > n else ()
+  frontier = ffos_fr_frontier(n, m, k) if m * k > n else ()
   depths = []
 
   def visit(items, samples, nodes, depth):
@@ -344,7 +316,7 @@ def write_heap_config(heap_memory, tcs_num=1):
     config_file.writelines(lines)
 
 
-def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=1):
+def estimate_heap(mode, n, block_size, sample_prob, k_value=None):
   if sample_prob <= 0 or sample_prob > 1:
     print("Invalid sampling probability P (must satisfy 0 < P <= 1)")
     sys.exit(1)
@@ -385,17 +357,17 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=1):
     )
     heap_memory = int(math.ceil(heap_memory * 1.25))
 
-  elif mode == 5:
+  elif mode in (5, 6):
     k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
     mask_words = (k + WORD_BITS - 1) // WORD_BITS
-    swo_bits, ofr_words = ofrsupple_control_counts(n, m, k)
+    swo_bits, ofr_words = ffos_fr_control_counts(n, m, k)
     # Prepared nodes write directly into the single packed stream. Balanced
     # tiled nodes use bounded stack state rather than heap conversion arrays.
     control_bytes = (swo_bits + 7) // 8 + (ofr_words + 3) // 4
     shape_bytes = 64 * k
     mark_bytes = n * mask_words * SIZE_T_BYTES
     result_bytes = m * k * block_size
-    workspace_bytes, data_items, compact_items = ofrsupple_workspace_sizes(n, m, k)
+    workspace_bytes, data_items, compact_items = ffos_fr_workspace_sizes(n, m, k)
     # Reserve all per-depth buffers simultaneously; owned membership avoids
     # route copies. A generic Compact also uses flags and uint32_t prefixes.
     compact_bytes = compact_items + (4 * (compact_items + 1) if compact_items else 0)
@@ -407,7 +379,7 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=1):
     heap_memory += max(offline_peak, mark_peak, online_peak) + 64 * 1024
     heap_memory = int(math.ceil(heap_memory * 1.35))
 
-  elif mode in (13, 4, 14):
+  elif mode in (13, 4):
     k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
     mask_words, left_words, right_words = route_state_sizes(n, m, k)
     route_bytes = (node_num(n, m, k) + 7) // 8
@@ -430,20 +402,6 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=1):
         selected_bytes +
         workspace_mark_bytes +
         workspace_data_bytes +
-        plain_result_bytes +
-        64 * 1024
-      )
-    else:
-      parallel_threads = swo_effective_threads(n, m, k, threads)
-      tcs_num = parallel_threads
-      parallel_workspace_mark_bytes = workspace_mark_bytes
-      parallel_workspace_data_bytes = (2 * n * block_size) * parallel_threads
-      heap_memory += (
-        route_bytes +
-        mark_bytes +
-        selected_bytes +
-        parallel_workspace_mark_bytes +
-        parallel_workspace_data_bytes +
         plain_result_bytes +
         64 * 1024
       )
@@ -470,12 +428,10 @@ def k_candidates_for(mode, sample_prob, k_values, k_select):
   return [max(1, int(1.0 / sample_prob))]
 
 
-def build_command(mode, n, block_size, sample_prob, k_value, repeat, threads, warmup):
+def build_command(mode, n, block_size, sample_prob, k_value, repeat, warmup):
   cmd = ["./application", str(mode), str(n), str(block_size), str(sample_prob)]
   if MODE_INFO[mode]["needs_k"]:
     cmd.append(str(k_value))
-  if mode == 14:
-    cmd.append(str(threads))
   cmd.append(str(repeat))
   cmd.append(str(warmup))
   return cmd
@@ -632,7 +588,6 @@ def main():
   block_sizes = parse_csv(args.block_sizes, "block-sizes", int)
   repeat = int(args.repeat)
   warmup = int(args.warmup)
-  threads = int(args.threads)
   initialized_csv_files = set()
   had_failed_run = False
 
@@ -641,9 +596,6 @@ def main():
     return 1
   if warmup < 0:
     print("WARMUP must be >= 0")
-    return 1
-  if threads <= 0:
-    print("THREADS must be > 0")
     return 1
   for p_rate in p_values:
     if p_rate <= 0.0 or p_rate > 1.0:
@@ -670,7 +622,6 @@ def main():
               block_size,
               p_rate,
               k_value if MODE_INFO[mode]["needs_k"] else None,
-              threads,
             )
             heap_mb = float(heap_bytes) / (1024.0 * 1024.0)
 
@@ -679,19 +630,12 @@ def main():
             if build.returncode != 0:
               print("Build failed before experiment:", build.stderr.decode("utf-8", errors="ignore"))
               return 1
-            cmd = build_command(mode, n, block_size, p_rate, k_value, repeat, threads, warmup)
+            cmd = build_command(mode, n, block_size, p_rate, k_value, repeat, warmup)
 
-            if mode == 14:
-              effective_threads = swo_effective_threads(n, m_value, k_value, threads)
-              print(
-                "Running experiment: mode = %d (%s), b = %d, p = %.4f, n = %d, m = %d, k = %d, threads = %d, active_threads = %d, heap_est = %.2f MB"
-                % (mode, mode_name, block_size, p_rate, n, m_value, k_value, threads, effective_threads, heap_mb)
-              )
-            else:
-              print(
-                "Running experiment: mode = %d (%s), b = %d, p = %.4f, n = %d, m = %d, k = %d, heap_est = %.2f MB"
-                % (mode, mode_name, block_size, p_rate, n, m_value, k_value, heap_mb)
-              )
+            print(
+              "Running experiment: mode = %d (%s), b = %d, p = %.4f, n = %d, m = %d, k = %d, heap_est = %.2f MB"
+              % (mode, mode_name, block_size, p_rate, n, m_value, k_value, heap_mb)
+            )
 
             env = os.environ.copy()
             # Keep normal totals free of per-phase clock OCALLs, even if this
@@ -727,7 +671,7 @@ def main():
             print("Out_lines: %s\n" % (parsed,))
             results[(n, k_value)] = make_result(mode, k_value, parsed, recorded_memory_mib)
 
-            if args.offline_profile and mode in (4, 5):
+            if args.offline_profile and mode in (4, 5, 6):
               # Run diagnostics separately so their clock OCALLs never enter
               # the normal CSV's offline or online totals.
               profile_env = env.copy()
@@ -763,7 +707,7 @@ def main():
           with open(csv_file_name, file_mode) as csv_file:
             for n, k_used in sorted(results.keys(), key=lambda item: (item[0], item[1])):
               csv_file.write(format_csv_line(mode, block_size, p_rate, n, results[(n, k_used)]))
-        if args.offline_profile and mode in (4, 5):
+        if args.offline_profile and mode in (4, 5, 6):
           profile_file = results_folder / (mode_name + "_offline_profile.csv")
           profile_mode = "w" if args.overwrite and profile_file not in initialized_csv_files else "a"
           initialized_csv_files.add(profile_file)

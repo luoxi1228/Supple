@@ -46,8 +46,9 @@ static double Run(Enclave &enclave, int mode, size_t n, size_t m, size_t k,
   sgx_status_t status = SGX_ERROR_UNEXPECTED;
   switch (mode) {
     case 2: status = DecPSQF_SWO(enclave.id, input.data(), n, m, encrypted_width, output.data(), &ret); break;
-    case 4: status = DecSuppleSWO(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
-    case 5: status = DecOFRSupple(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
+    case 4: status = DecFFOS_C(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
+    case 5: status = DecFFOS_FR(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
+    case 6: status = DecFFOS_FR_Opt(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
     case 1: status = DecShuffleBasedSWO(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
     case 3: status = DecCompactionBasedSWO(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
   }
@@ -91,7 +92,7 @@ int main(int argc, char **argv) {
   std::setbuf(stdout, nullptr);
   if (bench) {
     std::puts("mode,trial,tracking,round,ecall_ms,ptime_ms,peak_bytes");
-    for (int mode : {1, 2, 3, 4, 5}) {
+    for (int mode : {1, 2, 3, 4, 5, 6}) {
       for (int trial = 0; trial < 5; ++trial) {
         for (int setting = 0; setting < (compare ? 3 : baseline ? 1 : 2); ++setting) {
           // For the three-build comparison, rotate -1=unwrapped, 0=disabled,
@@ -112,13 +113,21 @@ int main(int argc, char **argv) {
     }
     return 0;
   }
-  for (int mode : {1, 2, 3, 4, 5}) {
+  for (int mode : {1, 2, 3, 4, 5, 6}) {
     for (size_t k : {size_t(1), size_t(2), size_t(4), size_t(8)}) {
       Enclave enclave(argv[1]);
+      size_t first_peak = 0;
       for (int round = 0; round < 3; ++round) {
         size_t peak = 0;
         double ptime = 0;
         Run(enclave, mode, 64, 16, k, 24, true, &peak, &ptime);
+        // TCSPolicy=1 resets TLS on every root ECALL. Selection scratch must
+        // be released by its owner rather than leaking a fresh bool[N] each
+        // round, including FFOS_FR's compaction paths.
+        if (mode == 4 || mode == 5 || mode == 6) {
+          if (round == 0) first_peak = peak;
+          assert(peak == first_peak);
+        }
         std::printf("PASS mode=%d n=64 m=16 k=%zu round=%d peak=%zu\n", mode, k, round, peak);
       }
     }
@@ -134,8 +143,9 @@ int main(int argc, char **argv) {
     unsigned char buffer[64]{};
     switch (mode) {
       case 2: DecPSQF_SWO(enclave.id, buffer, 0, 0, 52, buffer, &bad); break;
-      case 4: DecSuppleSWO(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
-      case 5: DecOFRSupple(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
+      case 4: DecFFOS_C(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
+      case 5: DecFFOS_FR(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
+      case 6: DecFFOS_FR_Opt(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
       case 1: DecShuffleBasedSWO(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
       case 3: DecCompactionBasedSWO(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
     }
@@ -145,13 +155,26 @@ int main(int argc, char **argv) {
     // A bad AES-GCM tag is an algorithm failure, not a successful measurement.
     switch (mode) {
       case 2: DecPSQF_SWO(enclave.id, buffer, 1, 1, 52, buffer, &bad); break;
-      case 4: DecSuppleSWO(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
-      case 5: DecOFRSupple(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
+      case 4: DecFFOS_C(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
+      case 5: DecFFOS_FR(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
+      case 6: DecFFOS_FR_Opt(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
       case 1: DecShuffleBasedSWO(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
       case 3: DecCompactionBasedSWO(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
     }
     assert(bad.memory_profile_status == MEMORY_PROFILE_INVALID);
   }
+  // Identical allocation ownership and control tapes across the two FR backends.
+  for (size_t width : {8U, 16U, 24U})
+    for (size_t n : {64U, 65U}) {
+      Enclave enclave(argv[1]);
+      size_t scalar_peak = 0, opt_peak = 0;
+      double ptime = 0;
+      for (int round = 0; round < 3; ++round) {
+        Run(enclave, 5, n, 2, 32, width, true, &scalar_peak, &ptime);
+        Run(enclave, 6, n, 2, 32, width, true, &opt_peak, &ptime);
+        assert(scalar_peak == opt_peak);
+      }
+    }
   // Specialized and generic compaction dispatch widths, tiny inputs and
   // both extreme sample sizes. Use fresh enclaves after failures.
   for (size_t width : {4, 8, 12, 16, 24, 32, 40, 64}) {

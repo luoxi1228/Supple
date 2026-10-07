@@ -87,7 +87,7 @@ Global Flags will sit in CONFIG.h
     // For qsort
     double qsort_time;
 
-    // Optional online-phase breakdown for Supple and OFRSupple. Times are ms.
+    // Optional online-phase breakdown for FFOS_C and FFOS_FR. Times are ms.
     int collect_online_profile;
     double online_route_ms;
     double online_reorder_ms;

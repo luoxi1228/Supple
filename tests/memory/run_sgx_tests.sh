@@ -6,10 +6,10 @@ test_build=$(mktemp -d /tmp/supple-memory-sgx.XXXXXX)
 sdk_dir=${SGX_SDK:-/opt/intel/sgxsdk}
 cd "$project_dir"
 echo "SGX test artifacts: $test_build" >&2
-make -f tests/swo/sgx_smoke.mk -B -j4 enclave.so >&2
+make -f tests/ffos_c/sgx_smoke.mk -B -j4 enclave.so >&2
 "$sdk_dir/bin/x64/sgx_sign" sign -key Enclave/Enclave_private.pem \
   -enclave enclave.so -out "$test_build/enclave.signed.so" \
-  -config tests/swo/sgx_smoke.config.xml >&2
+  -config tests/ffos_c/sgx_smoke.config.xml >&2
 "$sdk_dir/bin/x64/sgx_edger8r" --untrusted Enclave/Enclave.edl \
   --search-path Enclave --search-path "$sdk_dir/include" --untrusted-dir Untrusted
 gcc -fPIC -O3 -I"$sdk_dir/include" -IUntrusted \

@@ -14,6 +14,12 @@
 namespace ofr
 {
 
+#ifdef OFR_TEST_GATE_COUNTS
+// Test-only execution probes; production builds contain no probe updates.
+extern uint64_t test_scalar_gate_calls;
+extern uint64_t test_four_gate_batches;
+#endif
+
 using detail::AddOverflowSize;
 using detail::CtEqualU8;
 using detail::CtLessSize;
@@ -446,11 +452,19 @@ struct StyledGate
                   size_t block_size,
                   uint8_t control) const
   {
+#ifdef OFR_TEST_GATE_COUNTS
+    ++test_scalar_gate_calls;
+#endif
     ofork_buffer<style>(first, second, static_cast<uint32_t>(block_size),
                         static_cast<uint8_t>((control >> 1U) & 1U),
                         static_cast<uint8_t>(control & 1U));
   }
 };
+
+// A distinct gate type deliberately bypasses the four-gate specializations.
+// It reuses the same per-gate assembly and COUNT_OSWAPS increment as StyledGate.
+template <OFork_Style style>
+struct ScalarStyledGate : StyledGate<style> {};
 
 #if defined(__SSE2__) && defined(__x86_64__) && !defined(__ILP32__)
 template <>
@@ -461,6 +475,9 @@ void ApplyFourIndependent<StyledGate<OFORK_8> >(
 {
   (void)block_size;
   (void)apply_gate;
+#ifdef OFR_TEST_GATE_COUNTS
+  ++test_four_gate_batches;
+#endif
   detail::fourgate_sse2::ApplyFour8(first, second, controls,
 #ifdef COUNT_OSWAPS
                                  &OSWAP_COUNTER
@@ -478,6 +495,9 @@ void ApplyFourIndependent<StyledGate<OFORK_16> >(
 {
   (void)block_size;
   (void)apply_gate;
+#ifdef OFR_TEST_GATE_COUNTS
+  ++test_four_gate_batches;
+#endif
   detail::fourgate_sse2::ApplyFour16(first, second, controls,
 #ifdef COUNT_OSWAPS
                                   &OSWAP_COUNTER
@@ -2254,16 +2274,16 @@ void OFRApplyPreparedPostOrderInPlace(
     size_t n,
     size_t n_left,
     size_t n_right,
-    size_t block_size)
+    size_t block_size, bool use_four_gate_sse2)
 {
   OFRApplyPreparedPostOrderInPlace(
       data, postorder_controls.view(),
-      n, n_left, n_right, block_size);
+      n, n_left, n_right, block_size, use_four_gate_sse2);
 }
 
 void OFRApplyPreparedPostOrderInPlace(
     unsigned char *data, PackedControlView postorder_controls, size_t n, size_t n_left, size_t n_right,
-    size_t block_size)
+    size_t block_size, bool use_four_gate_sse2)
 {
   ValidateCapacities(n, n_left, n_right);
   size_t data_bytes = 0;
@@ -2283,14 +2303,26 @@ void OFRApplyPreparedPostOrderInPlace(
     next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
                                StyledGate<OFORK_4>());
   else if (block_size == 8)
-    next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
-                               StyledGate<OFORK_8>());
+  {
+    if (use_four_gate_sse2)
+      next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
+                                StyledGate<OFORK_8>());
+    else
+      next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
+                                ScalarStyledGate<OFORK_8>());
+  }
   else if (block_size == 12)
     next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
                                StyledGate<OFORK_12>());
   else if (block_size == 16)
-    next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
-                               StyledGate<OFORK_16>());
+  {
+    if (use_four_gate_sse2)
+      next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
+                                StyledGate<OFORK_16>());
+    else
+      next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
+                                ScalarStyledGate<OFORK_16>());
+  }
   else if (block_size == 24)
     next = ApplyPostOrderGates(data, control_data, n, block_size, 0,
                                StyledGate<OFORK_24>());

@@ -479,9 +479,9 @@ void DecShuffleBasedSWO(unsigned char *encrypted_buffer, size_t N, size_t M, siz
                      encrypted_result_buffer, ret);
 }
 
-void DecSuppleSWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size,
+void DecFFOS_C(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size,
   unsigned char *encrypt_result_buffer, enc_ret *ret) {
-  DecSuppleSWO(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret);
+  DecFFOS_C(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret);
 }
 
 void DecCompactionBasedSWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K,
@@ -490,14 +490,15 @@ void DecCompactionBasedSWO(unsigned char *encrypted_buffer, size_t N, size_t M, 
                        encrypted_result_buffer, ret);
 }
 
-void DecSuppleSWO_parallel(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size,
-  unsigned char *encrypt_result_buffer, enc_ret *ret, size_t nthreads) {
-  DecSuppleSWO_parallel(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret, nthreads);
+
+void DecFFOS_FR(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size,
+  unsigned char *encrypt_result_buffer, enc_ret *ret) {
+  DecFFOS_FR(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret);
 }
 
-void DecOFRSupple(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size,
+void DecFFOS_FR_Opt(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size,
   unsigned char *encrypt_result_buffer, enc_ret *ret) {
-  DecOFRSupple(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret);
+  DecFFOS_FR_Opt(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret);
 }
 
 void RecursiveShuffle_M1(unsigned char *buf, uint64_t N, size_t block_size) {

@@ -4,7 +4,7 @@
 #define encryptBuffer UnusedHostEncrypt
 #define PRB_pool_init UnusedHostPoolInit
 #define PRB_pool_shutdown UnusedHostPoolShutdown
-#include "../swo/host_support.hpp"
+#include "../ffos_c/host_support.hpp"
 #undef ocall_clock
 #undef decryptBuffer
 #undef encryptBuffer

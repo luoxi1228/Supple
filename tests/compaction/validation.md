@@ -31,7 +31,7 @@ Platinum 8369B host. Production enclave and the test overlay use `-O3`.
   End-to-end application/script tests verify headers, measured bytes to MiB,
   old-file backups, appending to new files, warmups and K=0 rejection.
 - Existing SWO serial: 2,952 cases; SWO parallel/fallback: 18 cases;
-  OFRSupple: 1,840 cases. All passed.
+  FFOS_FR: 1,840 cases. All passed.
 - The native HW enclave, host library and application build and sign
   successfully. No SGX device is exposed on this host, so hardware execution
   has not been tested.

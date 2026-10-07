@@ -75,7 +75,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Compare OFRCompact apply (excluding output "
-            "reordering) with one OCompact operation inside the Supple "
+            "reordering) with one OCompact operation inside the FFOS_C "
             "SGX enclave"
         )
     )

@@ -85,6 +85,6 @@ bash tests/ofr/run_phase_benchmark.sh 65536 9
 `offline_total_ms` 使用此准备路径。
 各 `online_ms` 使用生产 SSE2/汇编路径，计入完整的原位网络执行。
 这个独立 phase 基准先预热三次，再分别取各阶段的测量中位数；阶段中位数之和
-不等于同轮总耗时的中位数。它不同于 OFRSupple 成对基准的两次预热/七次测量。
+不等于同轮总耗时的中位数。它不同于 FFOS_FR 成对基准的两次预热/七次测量。
 这是宿主基准；SGX 内绝对耗时需另行测量。SIM 可验证 enclave 接口与模拟环境
 中的行为，其耗时不代表 HW 的 EPC、分页或真实 SGX 运行成本。

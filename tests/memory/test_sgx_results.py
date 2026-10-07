@@ -33,7 +33,7 @@ def main(build):
         config = directory / "Enclave.config.xml"
         config.write_bytes((ROOT / "Enclave/Enclave.config.xml").read_bytes())
         results = directory / "results"
-        args = ["run_experiments.py", "--modes", "1,2,3,4,5", "--n", "64", "--p", ".25",
+        args = ["run_experiments.py", "--modes", "1,2,3,4,5,6", "--n", "64", "--p", ".25",
                 "--k", "2", "--block-sizes", "24", "--repeat", "2", "--warmup", "2",
                 "--results-folder", str(results), "--offline-profile"]
         with mock.patch.object(experiments, "APP_DIR", build), \
@@ -41,7 +41,11 @@ def main(build):
              mock.patch.object(experiments.subprocess, "run", side_effect=process), \
              mock.patch.object(sys, "argv", args):
             assert experiments.main() == 0
-            for mode in (2, 4, 5, 1, 3):
+            assert {path.name for path in results.glob("*.csv")} == {
+                "ShuffleBasedSWO.csv", "PSQF_SWO.csv", "CompactionBasedSWO.csv",
+                "FFOS_C.csv", "FFOS_FR.csv", "FFOS_FR_Opt.csv", "FFOS_C_offline_profile.csv",
+                "FFOS_FR_offline_profile.csv", "FFOS_FR_Opt_offline_profile.csv"}
+            for mode in (2, 4, 5, 6, 1, 3):
                 path = results / (experiments.MODE_INFO[mode]["name"] + ".csv")
                 with path.open() as source:
                     rows = list(csv.DictReader(source))
@@ -52,17 +56,17 @@ def main(build):
                 old = path.read_text().replace("algorithm_heap_peak_mib", "heap_est_mb")
                 path.write_text(old)
             assert experiments.main() == 0
-            for mode in (2, 4, 5, 1, 3):
+            for mode in (2, 4, 5, 6, 1, 3):
                 name = experiments.MODE_INFO[mode]["name"]
                 assert (results / f"{name}.heap_est_backup.csv").is_file()
                 with (results / f"{name}.csv").open() as source:
                     assert len(list(csv.DictReader(source))) == 1
             assert experiments.main() == 0
-            for mode in (2, 4, 5, 1, 3):
+            for mode in (2, 4, 5, 6, 1, 3):
                 name = experiments.MODE_INFO[mode]["name"]
                 with (results / f"{name}.csv").open() as source:
                     assert len(list(csv.DictReader(source))) == 2
-        for mode in (4, 5):
+        for mode in (4, 5, 6):
             profile = results / (experiments.MODE_INFO[mode]["name"] + "_offline_profile.csv")
             with profile.open() as source:
                 rows = list(csv.DictReader(source))
@@ -82,9 +86,9 @@ def main(build):
         result = run(command, cwd=build, env=env, capture_output=True, text=True)
         assert result.returncode != 0
         # Exercise all new identifiers through the real CLI, including the
-        # old single-sample and parallel modes now numbered from 10 onward.
+        # older single-sample and multi-sample modes numbered from 10 onward.
         for mode in experiments.MODE_INFO:
-            command = experiments.build_command(mode, 64, 24, .25, 2, 1, 2, 0)
+            command = experiments.build_command(mode, 64, 24, .25, 2, 1, 0)
             command[0] = str(build / "application")
             result = run(command, cwd=build, env=env, capture_output=True, text=True, check=True)
             assert experiments.parse_output(mode, result.stdout) is not None
@@ -92,11 +96,17 @@ def main(build):
                 assert experiments.parse_memory_peak(result.stdout) > 0
             else:
                 assert experiments.parse_memory_peak(result.stdout) is None
-        for mode in (6, 7, 8, 9):
+        for mode in (7, 8, 9, 14):
             command = [str(build / "application"), str(mode), "64", "24", ".25", "1", "0"]
             result = run(command, cwd=build, env=env, capture_output=True, text=True)
             assert result.returncode != 0
             assert "MODE must be one of" in result.stdout
+        # The former parallel invocation, including its extra thread argument,
+        # must fail too rather than being accepted by the usage-only path.
+        command = [str(build / "application"), "14", "64", "24", ".25",
+                   "2", "2", "1", "0"]
+        result = run(command, cwd=build, env=env, capture_output=True, text=True)
+        assert result.returncode != 0
     print("PASS: real application, measured CSVs, legacy backups and offline-profile compatibility")
 
 

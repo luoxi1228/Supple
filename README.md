@@ -32,6 +32,20 @@ Current experiment entrypoints are:
 - `run_experiments.py`: single config run (CLI configurable)
 - `run.py`: batch runner for multiple experiment groups
 
+The paper's FFOS-C and FFOS-FR use the code names `FFOS_C` (mode 4) and
+`FFOS_FR` (mode 5). Mode 5 executes one assembly OFork per gate, matching the
+per-gate OSWAP/OFork execution and counter-update policy of modes 1–5.
+`FFOS_FR_Opt` (FFOS-FR-Opt, mode 6) retains four-gate SSE2 data processing for
+8/16-byte records. Other widths and non-postorder shapes use the scalar fallback.
+Both FR variants share control generation, packed controls, layout, workspaces,
+timing boundaries and heap accounting; only their online gate backend differs.
+Their sources live under `Enclave/SubSample_v2/FFOS_C`, `FFOS_FR` and
+`FFOS_FR_Opt`. Top-level result CSVs use these code names.
+Existing top-level optimized `FFOS_FR.csv` results were moved byte-for-byte to
+`FFOS_FR_Opt.csv`; fresh mode 5 measurements go to a new `FFOS_FR.csv`. Historical result directories,
+reports and source snapshots retain their recorded names. The stage comparison
+reader accepts both the historical and current method labels.
+
 ## 2.1 Quick Start (Batch Mode, Recommended)
 
 From the project root:
@@ -54,7 +68,7 @@ Default group layout in `run.py`:
 - `group_n`: sweep `n`
 
 The groups preserve their original algorithm selection with modes
-`[10,2,11,12,13,4]`. The direct script defaults to `[1,2,3,4,5]`.
+`[10,2,11,12,13,4]`. The direct script defaults to `[1,2,3,4,5,6]`.
 
 ## 2.2 Direct Run (Single Command)
 
@@ -62,7 +76,7 @@ From the project root:
 
 ```bash
 ./run_experiments.py \
-    --modes 1,2,3,4,5 \
+    --modes 1,2,3,4,5,6 \
     --n 1048576 \
     --p 0.015625 \
     --k 4,16,64,256,1024 \
@@ -73,24 +87,25 @@ From the project root:
     --overwrite
 ```
 
-To compare the online phases of Supple and OFRSupple at one configuration:
+To compare FFOS_C, per-gate FFOS_FR and FFOS_FR_Opt at one configuration:
 
 ```bash
-./run_experiments.py --modes 4,5 --n 65536 --p 0.015625 \
+./run_experiments.py --modes 4,5,6 --n 65536 --p 0.015625 \
     --k 64 --k-select 2 --block-sizes 64 --repeat 5 --overwrite
 ```
 
 The `apply_perm(online)` column is the enclave's online timing in milliseconds.
 For a route, reorder, copy, and Shuffle breakdown, see
-`RESULTS/ofrsupple_online_prepared.md`; the paired SIM benchmark supports
+`RESULTS/ofrsupple_online_prepared.md` (a historical report using the old names); the paired SIM benchmark supports
 `--profile` and writes those measurements to separate CSV columns.
 
 The default `run_experiments.py` run measures offline and online totals without
 offline phase clocks. Pass `--offline-profile` to collect offline phase timings
-and the SGX heap high-water mark for modes 4 and 5. This runs each case a
+and the SGX heap high-water mark for modes 4, 5 and 6. This runs each case a
 second time for diagnostics; the regular result CSV always uses the run
 without offline phase clocks. The diagnostic run writes
-`Supple_offline_profile.csv` and `OFRSupple_offline_profile.csv` beside the
+`FFOS_C_offline_profile.csv`, `FFOS_FR_offline_profile.csv` and
+`FFOS_FR_Opt_offline_profile.csv` beside the
 regular results. `mark_ms`, `count_ms`, `swo_write_ms`, `tags_ms`,
 `normalize_ms`, `ofr_write_ms`, `replay_ms`, `project_ms`, `prepare_ms`, and
 `other_ms` sum to the diagnostic run's offline time, which can differ from the
@@ -125,26 +140,25 @@ updated by a normal run.
 | 1 | ShuffleBasedSWO | 9 |
 | 2 | PSQF_SWO | 2 |
 | 3 | CompactionBasedSWO | 10 |
-| 4 | Supple | 6 |
-| 5 | OFRSupple | 8 |
+| 4 | FFOS_C | 6 |
+| 5 | FFOS_FR (per-gate OFork) | — |
+| 6 | FFOS_FR_Opt (four-gate SSE2) | former optimized mode 5 |
 | 10 | PSQF_single | 1 |
 | 11 | SubSample | 3 |
 | 12 | SubSampleMultiSlice | 4 |
 | 13 | SubSampleMulti_opt | 5 |
-| 14 | Supple_parallel | 7 |
 
-Modes 6–9 are unused and rejected. Use the new numbers in both
+Modes 6–9 and the removed mode 14 are rejected. Use the new numbers in both
 `run_experiments.py` and `Application/application`; old numbers are not aliases.
-Algorithm names, result filenames and existing CSV data remain unchanged.
+The remaining mode IDs are unchanged by the FFOS rename; historical CSV data is preserved.
 
 ### `k` Selection Behavior
 
-- Modes `1`, `3`, `4`, `5`, `12`, `13`, and `14`:
+- Modes `1`, `3`, `4`, `5`, `12`, and `13`:
     - `k-select=1`: use derived `k = max(1, int(1/p))`
     - `k-select=2`: sweep values from `--k`
 - Mode `2`: always uses `k = max(1, int(1/p))`
 - Modes `10` and `11`: fixed `k = 1`
-- Mode `14` also accepts `--threads` for parallel execution.
 
 ------------------------------------------------------------------------
 
@@ -159,13 +173,13 @@ Each mode writes to one CSV file:
 - `<RESULTS_FOLDER>/SubSample.csv`
 - `<RESULTS_FOLDER>/SubSampleMultiSlice.csv`
 - `<RESULTS_FOLDER>/SubSampleMulti_opt.csv`
-- `<RESULTS_FOLDER>/Supple.csv`
-- `<RESULTS_FOLDER>/Supple_parallel.csv`
-- `<RESULTS_FOLDER>/OFRSupple.csv`
+- `<RESULTS_FOLDER>/FFOS_C.csv`
+- `<RESULTS_FOLDER>/FFOS_FR.csv`
+- `<RESULTS_FOLDER>/FFOS_FR_Opt.csv`
 - `<RESULTS_FOLDER>/ShuffleBasedSWO.csv`
 - `<RESULTS_FOLDER>/CompactionBasedSWO.csv`
 
-Modes `1`, `2`, `3`, `4`, and `5` write the column names on the first line and
+Modes `1`, `2`, `3`, `4`, `5`, and `6` write the column names on the first line and
 leave one blank line between separate executions of `run_experiments.py`.
 Existing headerless files and files with a `heap_est_mb` header are preserved as
 `<mode>.heap_est_backup.csv` before a new result file is started; collisions
@@ -189,7 +203,7 @@ Columns:
 Mode `2` uses `ecall_time_ms` and `ptime_ms` in its CSV header.
 Its final column is `algorithm_heap_peak_mib` instead of `heap_est_mb`.
 
-## 3.3 Modes 1/3/4/5/12/13/14
+## 3.3 Modes 1/3/4/5/12/13
 
 Columns:
 
@@ -202,7 +216,7 @@ Their final column is `algorithm_heap_peak_mib` instead of `heap_est_mb`.
 Mode `1` has no offline phase: `gen_perm=0` and `apply_perm=ptime`. Use `k=1`
 for a single sample and `k>1` for repeated shuffle-and-truncate sampling.
 
-Mode `3` reuses `markGen` and Supple's serial `TightCompact_v2`. Each round
+Mode `3` reuses `markGen` and FFOS_C's serial `TightCompact_v2`. Each round
 selects exactly `m` records, compacts all `n` records in place, and copies the
 first `m` to that sample's output; there is no additional shuffle. Marks use
 one reusable `bool[n]` buffer. Samples use fresh randomness and may overlap,
@@ -212,7 +226,7 @@ output order. `gen_perm_offline_ms` sums marking time and
 alternate within the `k` iterations rather than running as two batch phases.
 `ptime_ms` is their sum; decryption/encryption are included in ECALL time.
 Algorithm timing uses `2*k+1` clock OCALLs, separate from the allocation
-recorder, which adds no clock calls. The default modes are `[1,2,3,4,5]`.
+recorder, which adds no clock calls. The default modes are `[1,2,3,4,5,6]`.
 
 Example:
 
@@ -226,7 +240,7 @@ SGX SIM tests including mode 3: `bash tests/memory/run_sgx_tests.sh`.
 Where:
 
 - `heap_est_mb` is the estimated heap size (MB) used to patch `Enclave.config.xml`
-    before each run, retained in the CSV only for modes 10/11/12/13/14.
+    before each run, retained in the CSV only for modes 10/11/12/13.
 - `algorithm_heap_peak_mib` (modes 1/2/3/4/5) is the maximum simultaneous live
     requested heap bytes across successful **measured** rounds, divided by
     1,048,576. Each round spans decryption, offline and online execution,

@@ -7,15 +7,20 @@ overlap without depending on allocation calls inside a dynamically linked
 host standard library. Production uses the SGX static C++ runtime.
 
 Run `bash tests/memory/run_sgx_tests.sh` from an SDK/SGX SIM environment for
-real ECALL, AES-GCM, PRB, Shuffle, CompactionBasedSWO, Supple and OFRSupple integration. The build
+real ECALL, AES-GCM, PRB, Shuffle, CompactionBasedSWO, FFOS_C, FFOS_FR and FFOS_FR_Opt integration. The build
 uses the existing test-only PIC/TLS overlay and creates the signed enclave,
 host library and executables under `/tmp`; it does not replace the tracked
-application binaries or result CSVs. All five modes are tested with
-`k=1`, `m*k<n`, `m*k=n`, `m*k>n`, repeated cached rounds, invalid calls and
+application binaries or result CSVs. All six modes are tested with
+`k=1`, `m*k<n`, `m*k=n`, `m*k>n`, repeated rounds, invalid calls and
 PSQF's non-divisible fallback, and failed AES-GCM authentication. Mode 3 also
 tests specialized/generic record widths, N=1, M=1/M=N, overflow and failed
 output allocation. Production enclave objects are rebuilt with
 the SIM overlay; rebuild with the production Makefile before hardware runs.
+
+FFOS_C, FFOS_FR and FFOS_FR_Opt must report identical peaks across repeated identical
+ECALLs under `TCSPolicy=1`. Their selection scratch is owned by each control
+generation/apply call, shared across serial recursive compactions, and freed
+on return or exception; it does not depend on TLS surviving the next ECALL.
 
 Run `bash tests/memory/run_sgx_tests.sh --benchmark` to report five alternating
 enabled/disabled trials per mode at `n=16384,m=256,k=64,block_size=16`, with
@@ -39,5 +44,8 @@ first and retain the signed artifact path printed on stderr.
 The recorder covers requested allocation bytes, not allocator rounded usable
 sizes. SGX dlrealloc frees `realloc(p,0)`, and allocates a moving destination
 before releasing the old block; both behaviors are reflected in the ledger.
-The supported experiment modes are serial. Parallel mode 14 does not enable
-this recorder.
+The supported experiment modes are serial; modes 1–6 enable this recorder.
+
+The FR scalar (mode 5) and four-gate SSE2 (mode 6) paths are also compared
+within the same enclave: both authenticate outputs and report identical heap
+peaks across repeated calls at 8/16/24-byte widths and non-power-of-two sizes.

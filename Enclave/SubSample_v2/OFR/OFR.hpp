@@ -214,17 +214,18 @@ void OFRApplyPreparedLevelOrderedInPlace(
     size_t n_right,
     size_t block_size);
 
+// The public backend choice changes gate execution only, never tape layout.
 void OFRApplyPreparedPostOrderInPlace(
     unsigned char *data,
     const PackedControls &postorder_controls,
     size_t n,
     size_t n_left,
     size_t n_right,
-    size_t block_size);
+    size_t block_size, bool use_four_gate_sse2 = true);
 
 void OFRApplyPreparedPostOrderInPlace(
     unsigned char *data, PackedControlView postorder_controls, size_t n, size_t n_left, size_t n_right,
-    size_t block_size);
+    size_t block_size, bool use_four_gate_sse2 = true);
 
 // Replay a DFS control span on machine-word membership rows in place.
 void OFRApplyWordsInPlace(

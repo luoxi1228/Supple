@@ -138,10 +138,10 @@ Enclave_Cpp_Files := Enclave/Enclave.cpp Enclave/utils.cpp Enclave/MemoryProfile
 		Enclave/SubSample/SubSample.cpp Enclave/Baseline/SWO/PSQF_SWO.cpp \
 		Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.cpp \
 		Enclave/Baseline/Compaction_based/CompactionBasedSWO.cpp \
-		Enclave/SubSample_v2/SWO/SuppleSWO.cpp Enclave/SubSample_v2/SWO/helper.cpp \
+		Enclave/SubSample_v2/FFOS_C/FFOS_C.cpp Enclave/SubSample_v2/FFOS_C/helper.cpp \
 		Enclave/SubSample_v2/OFR/OFR.cpp Enclave/SubSample_v2/OFR/helper.cpp Enclave/SubSample_v2/OFR/OFRBenchmark.cpp \
-		Enclave/SubSample_v2/OFRSupple/OFRSupple.cpp \
-		Enclave/SubSample_v2_Par/SuppleSWO_parallel.cpp Enclave/SubSample_v2_Par/helper.cpp \
+		Enclave/SubSample_v2/FFOS_FR/FFOS_FR.cpp \
+		Enclave/SubSample_v2/FFOS_FR_Opt/FFOS_FR_Opt.cpp \
 		$(wildcard Enclave/Edger8rSyntax/*.cpp) $(wildcard Enclave/TrustedLibrary/*.cpp)
 
 Enclave_Include_Paths := -IInclude -IEnclave -I$(SGX_SDK)/include -I$(SGX_SDK)/include/libcxx -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/stlport -I$(SGXSSL_INCLUDE_PATH)
@@ -238,7 +238,11 @@ endif
 
 ######## App Objects ########
 
-Untrusted/Enclave_u.c: $(SGX_EDGER8R) Enclave/Enclave.edl Enclave/Baseline/SWO/PSQF_SWO.edl Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.edl Enclave/Baseline/Compaction_based/CompactionBasedSWO.edl
+FFOS_Edl_Files := Enclave/SubSample_v2/FFOS_C/FFOS_C.edl \
+                  Enclave/SubSample_v2/FFOS_FR/FFOS_FR.edl \
+                  Enclave/SubSample_v2/FFOS_FR_Opt/FFOS_FR_Opt.edl
+
+Untrusted/Enclave_u.c: $(SGX_EDGER8R) Enclave/Enclave.edl $(FFOS_Edl_Files) Enclave/Baseline/SWO/PSQF_SWO.edl Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.edl Enclave/Baseline/Compaction_based/CompactionBasedSWO.edl
 	@cd Untrusted && $(SGX_EDGER8R) --untrusted ../Enclave/Enclave.edl --search-path ../Enclave --search-path $(SGX_SDK)/include
 	@echo "GEN  =>  $@"
 
@@ -263,7 +267,7 @@ $(App_Name): Untrusted/Enclave_u.o $(App_Cpp_Objects)
 
 ######## Enclave Objects ########
 
-Enclave/Enclave_t.c: $(SGX_EDGER8R) Enclave/Enclave.edl Enclave/Baseline/SWO/PSQF_SWO.edl Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.edl Enclave/Baseline/Compaction_based/CompactionBasedSWO.edl
+Enclave/Enclave_t.c: $(SGX_EDGER8R) Enclave/Enclave.edl $(FFOS_Edl_Files) Enclave/Baseline/SWO/PSQF_SWO.edl Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.edl Enclave/Baseline/Compaction_based/CompactionBasedSWO.edl
 	@cd Enclave && $(SGX_EDGER8R) --trusted ../Enclave/Enclave.edl --search-path ../Enclave --search-path $(SGX_SDK)/include
 	@echo "GEN  =>  $@"
 
@@ -281,6 +285,9 @@ Enclave/%.o: Enclave/%.cpp $(Enclave_Asm_Objects)
 
 Enclave/Baseline/Compaction_based/CompactionBasedSWO.o: Enclave/Baseline/Compaction_based/CompactionBasedSWO.hpp Enclave/SubSample/SubSample.hpp
 Enclave/ObliviousPrimitives.o: Enclave/ORCompaction/TightCompaction_v2.hpp Enclave/ORCompaction/TightCompaction_v2.tcc
+Enclave/SubSample_v2/FFOS_FR/FFOS_FR.o: Enclave/SubSample_v2/FFOS_FR/FFOS_FR.hpp Enclave/SubSample_v2/OFR/OFR.hpp
+Enclave/SubSample_v2/FFOS_FR_Opt/FFOS_FR_Opt.o: Enclave/SubSample_v2/FFOS_FR_Opt/FFOS_FR_Opt.hpp Enclave/SubSample_v2/FFOS_FR/FFOS_FR.hpp
+Enclave/SubSample_v2/OFR/OFR.o: Enclave/SubSample_v2/OFR/OFR.hpp Enclave/SubSample_v2/OFR/FourGateSSE2.hpp Enclave/oasm_lib.tcc
 
 Enclave/asm/%.s: Enclave/%.cpp $(Enclave_Asm_Objects)
 	@mkdir -p $$(dirname $@)

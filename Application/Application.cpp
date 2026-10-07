@@ -33,7 +33,6 @@ size_t BLOCK_SIZE;
 size_t REPEAT;
 size_t WARMUP = 1;
 size_t TOTAL_ROUNDS;
-size_t NTHREADS = 1;
 
 uint64_t NUM_ZERO_BYTES;
 unsigned char *zeroes = nullptr;
@@ -49,35 +48,34 @@ double calculateAve(const double *input, size_t N) {
 
 void parseCommandLineArguments(int argc, char *argv[]) {
   if (argc < (NUM_ARGUMENTS_REQUIRED + 1) ||
-      argc > (NUM_ARGUMENTS_REQUIRED + 4)) {
+      argc > (NUM_ARGUMENTS_REQUIRED + 3)) {
     printf("Did NOT receive the right number of command line arguments.\n"
           "Usage: ./application <2|10|11> <N> <BLOCK_SIZE> <P> <REPEAT> [WARMUP]\n"
-          "   or: ./application <1|3|4|5|12|13> <N> <BLOCK_SIZE> <P> <K> <REPEAT> [WARMUP]\n"
-          "   or: ./application <14> <N> <BLOCK_SIZE> <P> <K> <NTHREADS> <REPEAT> [WARMUP]\n\n"
+          "   or: ./application <1|3|4|5|6|12|13> <N> <BLOCK_SIZE> <P> <K> <REPEAT> [WARMUP]\n\n"
           "Oblivious SubSampling modes:\n"
           "  (1) ShuffleBasedSWO (shuffle and truncate K times)\n"
           "  (2) PSQF_SWO (Algorithm 1)\n"
           "  (3) CompactionBasedSWO (mark, compact and truncate K times)\n"
-          "  (4) SuppleSWO\n"
-          "  (5) OFRSupple\n"
+          "  (4) FFOS_C\n"
+          "  (5) FFOS-FR (per-gate OFork)\n"
+          "  (6) FFOS-FR-Opt (four-gate SSE2 for 8/16-byte records)\n"
           "  (10) PSQF_single (shuffle all then take first N*P)\n"
           "  (11) SubSample (randomly select N*P items, then compact)\n"
           "  (12) SubSampleMulti\n"
-          "  (13) SubSampleMulti_opt\n"
-          "  (14) SuppleSWO_parallel\n");
-    exit(0);
+          "  (13) SubSampleMulti_opt\n");
+    exit(argc > 1 ? 1 : 0);
   }
 
   MODE = atoi(argv[1]);
-  if (!((MODE >= 1 && MODE <= 5) || (MODE >= 10 && MODE <= 14))) {
-    printf("MODE must be one of 1,2,3,4,5,10,11,12,13,14.\n");
+  if (!((MODE >= 1 && MODE <= 6) || (MODE >= 10 && MODE <= 13))) {
+    printf("MODE must be one of 1,2,3,4,5,6,10,11,12,13.\n");
     exit(1);
   }
 
   const bool needs_k = MODE == 1 || MODE == 3 || MODE == 4 ||
-                       MODE == 5 || MODE == 12 || MODE == 13;
+                       MODE == 5 || MODE == 6 || MODE == 12 || MODE == 13;
   const int expected_argc = NUM_ARGUMENTS_REQUIRED + 1 +
-                            (needs_k ? 1 : 0) + (MODE == 14 ? 2 : 0);
+                            (needs_k ? 1 : 0);
   if (argc != expected_argc && argc != expected_argc + 1) {
     printf("Incorrect argument count for MODE %u.\n", MODE);
     exit(1);
@@ -98,13 +96,8 @@ void parseCommandLineArguments(int argc, char *argv[]) {
   if (needs_k) {
     K = atoi(argv[5]);
     requested_repeat = atoi(argv[6]);
-  } else if (MODE == 14) {
-    K = atoi(argv[5]);
-    NTHREADS = atoi(argv[6]);
-    requested_repeat = atoi(argv[7]);
   } else {
     K = 0;
-    NTHREADS = 1;
     requested_repeat = atoi(argv[5]);
   }
   if (requested_repeat <= 0) {
@@ -128,13 +121,9 @@ void parseCommandLineArguments(int argc, char *argv[]) {
     exit(1);
   }
   TOTAL_ROUNDS = WARMUP + REPEAT;
-  if ((MODE == 1 || MODE == 3 || MODE == 4 || MODE == 5 || MODE == 12 || MODE == 13 || MODE == 14) && K == 0) {
-    printf("MODE 1/3/4/5/12/13/14 expects K > 0\n");
+  if ((MODE == 1 || MODE == 3 || MODE == 4 || MODE == 5 || MODE == 6 || MODE == 12 || MODE == 13) && K == 0) {
+    printf("MODE 1/3/4/5/6/12/13 expects K > 0\n");
     exit(1);
-  }
-  if (MODE == 14 && NTHREADS == 0) {
-    printf("MODE 14 expects NTHREADS > 0\n");
-    exit(0);
   }
 }
 
@@ -191,7 +180,7 @@ int main(int argc, char *argv[]) {
   size_t offline_heap_peak_bytes = 0;
   size_t total_heap_peak_bytes = 0;
   size_t algorithm_heap_peak_bytes = 0;
-  const bool profile_memory = MODE >= 1 && MODE <= 5;
+  const bool profile_memory = MODE >= 1 && MODE <= 6;
   size_t num_oswaps[TOTAL_ROUNDS] = {};
 
   OpenSSL_add_all_algorithms();   // Initialize libcrypto
@@ -250,7 +239,7 @@ int main(int argc, char *argv[]) {
 
   // Create buffer of items to shuffle
   size_t output_blocks = N;
-  if (MODE == 1 || MODE == 3 || MODE == 4 || MODE == 5 || MODE == 12 || MODE == 13 || MODE == 14) {
+  if (MODE == 1 || MODE == 3 || MODE == 4 || MODE == 5 || MODE == 6 || MODE == 12 || MODE == 13) {
     output_blocks = SampleSize * K;
   }
   size_t total_blocks = (output_blocks > N) ? output_blocks : N;
@@ -335,8 +324,8 @@ int main(int argc, char *argv[]) {
     process_start = rtclock();
 
     enc_ret ret{};
-    ret.collect_online_profile = profile_online && (MODE == 4 || MODE == 5);
-    ret.collect_offline_profile = profile_offline && (MODE == 4 || MODE == 5);
+    ret.collect_online_profile = profile_online && (MODE == 4 || MODE == 5 || MODE == 6);
+    ret.collect_offline_profile = profile_offline && (MODE == 4 || MODE == 5 || MODE == 6);
     ret.collect_memory_profile = profile_memory;
     switch (MODE) {
       case 1:
@@ -371,7 +360,7 @@ int main(int argc, char *argv[]) {
 #endif
         break;
       case 4:
-        DecSuppleSWO(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
+        DecFFOS_C(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
         ptime_array[r] = ret.ptime;
         gen_perm_time_array[r] = ret.gen_perm_time;
         apply_perm_time_array[r] = ret.apply_perm_time;
@@ -386,7 +375,11 @@ int main(int argc, char *argv[]) {
       #endif
         break;
       case 5:
-        DecOFRSupple(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
+      case 6:
+        if (MODE == 5)
+          DecFFOS_FR(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
+        else
+          DecFFOS_FR_Opt(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
         ptime_array[r] = ret.ptime;
         gen_perm_time_array[r] = ret.gen_perm_time;
         apply_perm_time_array[r] = ret.apply_perm_time;
@@ -431,17 +424,6 @@ int main(int argc, char *argv[]) {
         break;
       case 13:
         decryptAndSubSampleMulti_opt(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
-        ptime_array[r] = ret.ptime;
-        gen_perm_time_array[r] = ret.gen_perm_time;
-        apply_perm_time_array[r] = ret.apply_perm_time;
-      #ifdef COUNT_OSWAPS
-        num_oswaps[r] = ret.OSWAP_count;
-      #else
-        num_oswaps[r] = 0;
-      #endif
-        break;
-      case 14:
-        DecSuppleSWO_parallel(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret, NTHREADS);
         ptime_array[r] = ret.ptime;
         gen_perm_time_array[r] = ret.gen_perm_time;
         apply_perm_time_array[r] = ret.apply_perm_time;
@@ -498,7 +480,7 @@ int main(int argc, char *argv[]) {
     size_t output_blocks = N;
     if (MODE == 10 || MODE == 11) {
       output_blocks = SampleSize;
-    } else if (MODE == 1 || MODE == 3 || MODE == 4 || MODE == 5 || MODE == 12 || MODE == 13 || MODE == 14) {
+    } else if (MODE == 1 || MODE == 3 || MODE == 4 || MODE == 5 || MODE == 6 || MODE == 12 || MODE == 13) {
       output_blocks = SampleSize * K;
     }
     unsigned char *decrypted_result_buf_ptr = buf;
@@ -547,7 +529,7 @@ int main(int argc, char *argv[]) {
   printf("%f\n", ecallTime_average);
   printf("%f\n", ptime_average);
 
-  if (MODE == 1 || MODE == 3 || MODE == 4 || MODE == 5 || MODE == 12 || MODE == 13 || MODE == 14) {
+  if (MODE == 1 || MODE == 3 || MODE == 4 || MODE == 5 || MODE == 6 || MODE == 12 || MODE == 13) {
     double gen_perm_time_average = calculateAve(gen_perm_time_array + WARMUP, REPEAT);
     double apply_perm_time_average = calculateAve(apply_perm_time_array + WARMUP, REPEAT);
     printf("%f\n", gen_perm_time_average);
@@ -557,7 +539,7 @@ int main(int argc, char *argv[]) {
   printf("%ld\n", num_oswaps[0]);
   if (profile_memory)
     printf("MEMORY,%zu\n", algorithm_heap_peak_bytes);
-  if (profile_online && (MODE == 4 || MODE == 5)) {
+  if (profile_online && (MODE == 4 || MODE == 5 || MODE == 6)) {
     const double route = calculateAve(online_route_array + WARMUP, REPEAT);
     const double reorder = calculateAve(online_reorder_array + WARMUP, REPEAT);
     const double copy = calculateAve(online_copy_array + WARMUP, REPEAT);
@@ -566,7 +548,7 @@ int main(int argc, char *argv[]) {
     printf("PROFILE,%f,%f,%f,%f,%f\n", route, reorder, copy, shuffle,
            online - route - reorder - copy - shuffle);
   }
-  if (profile_offline && (MODE == 4 || MODE == 5)) {
+  if (profile_offline && (MODE == 4 || MODE == 5 || MODE == 6)) {
     double phases[9] = {};
     double measured = 0.0;
     for (size_t phase = 0; phase < 9; ++phase) {

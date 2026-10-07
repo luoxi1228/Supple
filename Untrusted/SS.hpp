@@ -15,10 +15,11 @@ void DecShuffleBasedSWO(unsigned char *encrypted_buffer, size_t N, size_t M, siz
 
 void DecCompactionBasedSWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size, unsigned char *encrypted_result_buffer, enc_ret *ret);
 
-void DecSuppleSWO(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size, unsigned char *encrypt_result_buffer, enc_ret *ret);
+void DecFFOS_C(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size, unsigned char *encrypt_result_buffer, enc_ret *ret);
 
-void DecSuppleSWO_parallel(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size, unsigned char *encrypt_result_buffer, enc_ret *ret, size_t nthreads);
 
-void DecOFRSupple(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size, unsigned char *encrypt_result_buffer, enc_ret *ret);
+void DecFFOS_FR(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size, unsigned char *encrypt_result_buffer, enc_ret *ret);
+
+void DecFFOS_FR_Opt(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size, unsigned char *encrypt_result_buffer, enc_ret *ret);
 
 #endif

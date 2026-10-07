@@ -57,7 +57,7 @@ def supported_block_size(block_size: int) -> bool:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare OSwap and OFork inside the Supple SGX enclave"
+        description="Compare OSwap and OFork inside the FFOS_C SGX enclave"
     )
     parser.add_argument(
         "--binary",
