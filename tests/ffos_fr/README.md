@@ -60,6 +60,16 @@ because OFR now returns contiguous left and right views directly.
 currently skip leaf Shuffle. Without `--profile`, the application prints its
 normal timing lines and the `MEMORY` line.
 
+Prepared exact-fit FR subtrees (`n == m*k`) now copy their input directly into
+the final output slice once, then route its disjoint child views in place.
+They allocate no per-depth record buffers and perform no leaf copy back to
+the output. The input remains unchanged when input/output are disjoint.
+Frontier filtering and raw DFS controls retain their existing workspace paths;
+prepared exact-fit subtrees reached after filtering use the same optimization.
+Both FR modes share this storage change; mode 5 still invokes one scalar OFork
+and increments the counter once per gate. See
+[inplace_validation.md](inplace_validation.md) for before/after measurements.
+
 Add `--offline-profile` to record offline mark, count, SWO write, OFR tag,
 normalize, control write, membership replay, projection, preparation, and
 unattributed timings. It also reports the SGX runtime's process-lifetime heap

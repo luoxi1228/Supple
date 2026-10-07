@@ -58,6 +58,7 @@ int main() {
     const size_t n = 128, m = 2, k = 64;
     std::vector<unsigned char> data(n * width);
     for (size_t i = 0; i < data.size(); ++i) data[i] = static_cast<unsigned char>(i * 37);
+    const auto input_before = data;
     const auto membership = FFOS_CMark(n, m, k);
     const auto controls = FFOS_FRControl(membership, {}, n, m, k);
     const size_t gates = controls.ofr.size();
@@ -68,6 +69,7 @@ int main() {
     const auto optimized = FFOS_FR_OptApply(data.data(), controls, {}, n, m, k, width);
     CheckGates(gates, true, n, width);
     assert(scalar == optimized);
+    assert(data == input_before);
     std::vector<unsigned char> encrypted(n * width);
     enc_ret ret{};
     ResetGates();

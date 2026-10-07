@@ -70,6 +70,9 @@ FFOS_FRControls FFOS_FRControl(
     const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
     enc_ret *profile = nullptr);
 
+// Prepared exact-fit subtrees copy the input into their final output slice
+// once, then route disjoint child views in place. Disjoint inputs stay intact;
+// raw controls and frontier filtering retain their reusable workspaces.
 FFOS_FRReadResult FFOS_FRControlRead(
     const unsigned char *data, const FFOS_FRControls &controls,
     const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,

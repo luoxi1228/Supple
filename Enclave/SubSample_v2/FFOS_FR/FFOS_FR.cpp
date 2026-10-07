@@ -496,6 +496,57 @@ FFOS_FRControlPositions ValidateReadPlanNode(
   return position;
 }
 
+// A prepared exact-fit subtree owns disjoint output slices. Route its backing
+// output buffer once at each node, then recurse without copying or merging.
+// The complete public read plan is validated before entering this function.
+FFOS_FRReadResult ReadPreparedForkTreeInPlace(
+    unsigned char *data, const FFOS_FRControls &controls,
+    size_t n, size_t m, size_t k, size_t block_size,
+    FFOS_FRControlPositions position, size_t &node_index,
+    enc_ret *profile, FFOS_FRBackend backend)
+{
+  if (k == 1)
+    return {m, position};
+  const size_t left_k = k / 2;
+  const size_t left_n = m * left_k;
+  const size_t right_k = k - left_k;
+  const size_t right_n = n - left_n;
+  double *route_ms = profile ? &profile->online_route_ms : nullptr;
+  if (node_index >= controls.nodes.size())
+    throw std::length_error("FFOS_FR prepared node is missing");
+  const FFOS_FRControls::Node &plan = controls.nodes[node_index++];
+  if (plan.offset != position.ofr_words ||
+      plan.shape_index >= controls.shapes.size())
+    throw std::logic_error("FFOS_FR prepared node offset mismatch");
+  if (plan.offset > controls.ofr.size() ||
+      plan.count > controls.ofr.size() - plan.offset)
+    throw std::length_error("FFOS_FR prepared node exceeds control tape");
+  // The public read preflight has checked canonical counts and layouts for
+  // the entire plan before any output writes; retain cheap local checks.
+  const FFOS_FRControls::Shape &shape = controls.shapes[plan.shape_index];
+  if (shape.n != n || shape.n_left != left_n || shape.n_right != right_n)
+    throw std::logic_error("FFOS_FR prepared node shape mismatch");
+  online_profile::Track(route_ms, [&] {
+    const ofr::PackedControlView tape =
+        controls.ofr.view(plan.offset, plan.count);
+    if (plan.postordered)
+      ofr::OFRApplyPreparedPostOrderInPlace(
+          data, tape, n, left_n, right_n, block_size,
+          backend == FFOS_FRBackend::FourGateSSE2);
+    else
+      ofr::OFRApplyPreparedInPlace(
+          data, tape, n, left_n, right_n, block_size);
+  });
+  position.ofr_words += plan.count;
+  const FFOS_FRReadResult left = ReadPreparedForkTreeInPlace(
+      data, controls, left_n, m, left_k, block_size, position,
+      node_index, profile, backend);
+  const FFOS_FRReadResult right = ReadPreparedForkTreeInPlace(
+      data + left_n * block_size, controls, right_n, m, right_k,
+      block_size, left.next, node_index, profile, backend);
+  return {left.written_blocks + right.written_blocks, right.next};
+}
+
 FFOS_FRReadResult ReadNode(
     const unsigned char *data, const FFOS_FRControls &controls,
     const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
@@ -545,48 +596,16 @@ FFOS_FRReadResult ReadNode(
       return {left.written_blocks + right.written_blocks, right.next};
     }
 
-    if (node_index >= controls.nodes.size())
-      throw std::length_error("FFOS_FR prepared node is missing");
-    const FFOS_FRControls::Node &plan = controls.nodes[node_index++];
-    if (plan.offset != position.ofr_words ||
-        plan.shape_index >= controls.shapes.size())
-      throw std::logic_error("FFOS_FR prepared node offset mismatch");
-    if (plan.offset > controls.ofr.size() ||
-        plan.count > controls.ofr.size() - plan.offset)
-      throw std::length_error("FFOS_FR prepared node exceeds control tape");
-    // The public read preflight has checked canonical counts and layouts for
-    // the entire plan before any output writes; retain cheap local checks.
-    const FFOS_FRControls::Shape &shape = controls.shapes[plan.shape_index];
-    if (shape.n != n || shape.n_left != left_n || shape.n_right != right_n)
-      throw std::logic_error("FFOS_FR prepared node shape mismatch");
-    ffos_c_detail::FfosCDataWorkspace &work = workspaces[depth];
+    if (out_capacity_blocks < n)
+      throw std::length_error("FFOS_FR fork output exceeds buffer");
     online_profile::Track(copy_ms, [&] {
-      work.data_buf.reserve(n * block_size);
-      work.ensure_capacity(n, block_size);
-      std::memcpy(work.data_ptr(), data, n * block_size);
+      // Preserve the const input with one copy into the final output. All
+      // descendants route disjoint mutable slices of this same allocation.
+      if (samples != data)
+        std::memmove(samples, data, n * block_size);
     });
-    online_profile::Track(route_ms, [&] {
-      const ofr::PackedControlView tape =
-          controls.ofr.view(plan.offset, plan.count);
-      if (plan.postordered)
-        ofr::OFRApplyPreparedPostOrderInPlace(
-            work.data_ptr(), tape, n, left_n, right_n, block_size,
-            backend == FFOS_FRBackend::FourGateSSE2);
-      else
-        ofr::OFRApplyPreparedInPlace(
-            work.data_ptr(), tape, n, left_n, right_n, block_size);
-    });
-    position.ofr_words += plan.count;
-    const FFOS_FRReadResult left = ReadNode(
-        work.data_ptr(), controls, {}, left_n, m, left_k, block_size,
-        samples, out_capacity_blocks, position, workspaces, selected_scratch,
-        depth + 1, node_index, profile, backend);
-    const FFOS_FRReadResult right = ReadNode(
-        work.data_ptr() + left_n * block_size, controls, {}, right_n, m,
-        right_k, block_size, samples + left.written_blocks * block_size,
-        out_capacity_blocks - left.written_blocks, left.next,
-        workspaces, selected_scratch, depth + 1, node_index, profile, backend);
-    return {left.written_blocks + right.written_blocks, right.next};
+    return ReadPreparedForkTreeInPlace(samples, controls, n, m, k, block_size,
+                                       position, node_index, profile, backend);
   }
 
   const std::vector<FrontierNode> nodes =

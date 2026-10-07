@@ -13,6 +13,7 @@ using Samples = std::vector<std::vector<size_t>>;
 static size_t checked = 0;
 static size_t rejected_plans = 0;
 static size_t one_word_tag_cases = 0;
+static size_t prepared_view_cases = 0;
 
 static std::vector<unsigned char> Records(size_t n, size_t width)
 {
@@ -143,6 +144,57 @@ static FFOS_FRControls PreflightControls(size_t n, size_t m, size_t k)
   const std::vector<FrontierNode> frontier = m * k > n
       ? FFOS_CFrontier(n, m, k) : std::vector<FrontierNode>{};
   return FFOS_FRControl(membership, frontier, n, m, k);
+}
+
+static void CheckPreparedOutputViews()
+{
+  struct Shape { size_t n, m, k; };
+  for (const Shape shape : {Shape{128, 2, 64}, Shape{130, 2, 65},
+                            Shape{15, 3, 5}, Shape{24, 3, 8}})
+    for (size_t width : {8U, 16U, 24U})
+    {
+      const auto membership = FFOS_CMark(shape.n, shape.m, shape.k);
+      const auto controls = FFOS_FRControl(
+          membership, {}, shape.n, shape.m, shape.k);
+      const auto counts = FFOS_FRControlCount({}, shape.n, shape.m, shape.k);
+      assert(counts.swo_bits == 0 && !controls.nodes.empty());
+      // Raw DFS controls retain the independent copy-based reader. Require
+      // byte-identical output, including ordering within each sample.
+      FFOS_FRControls raw;
+      raw.ofr.resize(counts.ofr_words);
+      FFOS_FRControlWrite(membership, raw, {}, shape.n, shape.m, shape.k,
+                          {0, 0});
+      const auto records = Records(shape.n, width);
+      const auto expected = FFOS_FRApply(records.data(), raw, {},
+          shape.n, shape.m, shape.k, width);
+      const size_t guard = 13;
+      std::vector<unsigned char> input(2 * guard + records.size(), 0xa5);
+      std::copy(records.begin(), records.end(), input.begin() + guard);
+      const auto input_before = input;
+      for (size_t offset = 0; offset < 4; ++offset)
+      {
+        FFOS_FRControls shifted = controls;
+        shifted.ofr = ofr::PackedControls(offset + counts.ofr_words + 2,
+                                          ofr::OFR_COPY_SECOND);
+        for (size_t gate = 0; gate < counts.ofr_words; ++gate)
+          shifted.ofr[offset + gate] = controls.ofr[gate];
+        for (auto &node : shifted.nodes) node.offset += offset;
+        std::vector<unsigned char> output(
+            2 * guard + (shape.n + 3) * width, 0xa5);
+        const auto read = FFOS_FRControlRead(input.data() + guard, shifted,
+            {}, shape.n, shape.m, shape.k, width, output.data() + guard,
+            shape.n + 3, {0, offset});
+        assert(read.written_blocks == shape.n && read.next.swo_bits == 0);
+        assert(read.next.ofr_words == offset + counts.ofr_words);
+        assert(input == input_before);
+        assert(std::equal(expected.begin(), expected.end(),
+                          output.begin() + guard));
+        for (size_t byte = 0; byte < output.size(); ++byte)
+          if (byte < guard || byte >= guard + expected.size())
+            assert(output[byte] == 0xa5);
+        ++prepared_view_cases;
+      }
+    }
 }
 
 static void RejectPlanBeforeWrites(const FFOS_FRControls &controls,
@@ -281,6 +333,7 @@ int main()
 {
   CheckReadPlanPreflight();
   CheckOneWordTagPacking();
+  CheckPreparedOutputViews();
   assert(FFOS_FRControlCount({}, 8, 2, 4).swo_bits == 0);
   assert(FFOS_FRControlCount({}, 8, 2, 4).ofr_words > 0);
   assert(FFOS_FRControlCount(FFOS_CFrontier(9, 2, 8), 9, 2, 8).swo_bits > 0);
@@ -380,7 +433,8 @@ int main()
                   encrypted.data(), &ret);
   CheckSamples(encrypted, data, samples, m, width);
   std::printf("PASS: %zu FFOS_FR cases; %zu single-word tag cases; "
+              "%zu guarded prepared output-view cases; "
               "%zu invalid plans rejected before "
               "writes; membership, both control streams, offsets and ECALL\n",
-              checked, one_word_tag_cases, rejected_plans);
+              checked, one_word_tag_cases, prepared_view_cases, rejected_plans);
 }
