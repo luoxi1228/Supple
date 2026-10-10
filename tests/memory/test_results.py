@@ -1,4 +1,7 @@
+import contextlib
+import csv
 import importlib.util
+import io
 from pathlib import Path
 import tempfile
 import unittest
@@ -73,10 +76,132 @@ class MemoryResultsTest(unittest.TestCase):
             expected_command += ["1", "0"]
             self.assertEqual(experiments.build_command(mode, 64, 24, .25, 2, 1, 0), expected_command)
             self.assertEqual(experiments.k_candidates_for(mode, .25, [2, 8], 2),
-                             [1] if fixed_k else [2, 8] if needs_k else [4])
+                             [1] if fixed_k else [2, 8] if needs_k or mode == 2 else [4])
         for mode in (0, 7, 8, 9, 14, 15):
             with self.assertRaises(SystemExit):
                 experiments.normalize_modes([mode])
+
+    def run_psqf(self, p, k, *, n=1048576, k_select=2, failure=None):
+        commands = []
+        builds = []
+
+        def process(command, **kwargs):
+            if command[0] == "make":
+                builds.append(command)
+                return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+            commands.append(command)
+            index = len(commands)
+            if failure is not None and index == 2:
+                return failure
+            # Vary timings and place the largest peak first: totals must sum
+            # every call, while memory must use the maximum, not sum or last.
+            peak = (32 if index == 1 else 1) * 1048576
+            output = f"{index}.25\n{index}.125\n{index * 2}\nMEMORY,{peak}\n"
+            return SimpleNamespace(returncode=0, stdout=output.encode(), stderr=b"")
+
+        with tempfile.TemporaryDirectory() as directory:
+            args = SimpleNamespace(modes="2", n=str(n), p=str(p), k=str(k),
+                                   block_sizes="16", repeat=3, warmup=1,
+                                   k_select=k_select, results_folder=directory,
+                                   overwrite=False, offline_profile=False)
+            log = io.StringIO()
+            with mock.patch.object(experiments, "parse_args", return_value=args), \
+                 mock.patch.object(experiments, "estimate_heap", return_value=1048576), \
+                 mock.patch.object(experiments.subprocess, "run", side_effect=process), \
+                 contextlib.redirect_stdout(log):
+                status = experiments.main()
+            path = Path(directory) / "PSQF_SWO.csv"
+            if path.exists():
+                with path.open() as source:
+                    rows = list(csv.DictReader(source))
+            else:
+                rows = []
+        for command in commands:
+            self.assertEqual(command, ["./application", "2", str(n), "16", str(p), "3", "1"])
+        return status, rows, commands, builds, log.getvalue()
+
+    def test_psqf_group_p_batches_and_metrics(self):
+        for p, calls, produced in ((.25, 16, 64), (.0625, 4, 64),
+                                   (.015625, 1, 64), (.00390625, 1, 256),
+                                   (.0009765625, 1, 1024)):
+            with self.subTest(p=p):
+                status, rows, commands, builds, log = self.run_psqf(p, 64)
+                self.assertEqual(status, 0)
+                self.assertEqual(len(commands), calls)
+                self.assertEqual(len(builds), 1)
+                self.assertEqual(len(rows), 1)
+                row = rows[0]
+                self.assertEqual(int(row["k"]), 64)
+                total = calls * (calls + 1) // 2
+                self.assertEqual(float(row["ecall_time_ms"]), total + .25 * calls)
+                self.assertEqual(float(row["ptime_ms"]), total + .125 * calls)
+                self.assertEqual(int(row["oswaps"]), total * 2)
+                self.assertEqual(float(row["algorithm_heap_peak_mib"]), 32.0)
+                self.assertIn(f"calls_per_round = {calls}", log)
+                self.assertIn(f"actual_samples_per_round = {produced}", log)
+
+    def test_psqf_group_k_sweeps_each_target(self):
+        status, rows, commands, builds, log = self.run_psqf(.015625, "16,64,256,1024,4096")
+        self.assertEqual(status, 0)
+        self.assertEqual(len(commands), 86)
+        self.assertEqual(len(builds), 5)
+        self.assertEqual([int(row["k"]) for row in rows], [16, 64, 256, 1024, 4096])
+        first = 1
+        for row, calls, produced in zip(rows, (1, 1, 4, 16, 64), (64, 64, 256, 1024, 4096)):
+            total = sum(range(first, first + calls))
+            self.assertEqual(float(row["ecall_time_ms"]), total + .25 * calls)
+            self.assertEqual(float(row["ptime_ms"]), total + .125 * calls)
+            self.assertEqual(int(row["oswaps"]), total * 2)
+            self.assertIn(f"target_k = {row['k']}, calls_per_round = {calls}, "
+                          f"actual_samples_per_round = {produced}", log)
+            first += calls
+
+    def test_psqf_rounds_up_without_truncating_or_changing_derived_selection(self):
+        status, rows, commands, _, log = self.run_psqf(.25, 5)
+        self.assertEqual(status, 0)
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(rows[0]["k"], "5")
+        self.assertIn("actual_samples_per_round = 8", log)
+        status, rows, commands, _, _ = self.run_psqf(.015625, 4096, k_select=1)
+        self.assertEqual(status, 0)
+        self.assertEqual(len(commands), 1)
+        self.assertEqual(rows[0]["k"], "64")
+
+    def test_psqf_counts_actual_samples_with_rounding_and_fallback(self):
+        for p, k, calls, produced in ((.25, 9, 2, 10), (.3, 3, 3, 3)):
+            with self.subTest(p=p):
+                status, rows, commands, _, log = self.run_psqf(p, k, n=10)
+                self.assertEqual(status, 0)
+                self.assertEqual(len(commands), calls)
+                self.assertEqual(rows[0]["k"], str(k))
+                self.assertIn(f"actual_samples_per_round = {produced}", log)
+
+    def test_psqf_rejects_partial_batches_and_continues_next_target(self):
+        failures = (
+            SimpleNamespace(returncode=1, stdout=b"", stderr=b"failed"),
+            SimpleNamespace(returncode=0, stdout=b"bad output\n", stderr=b""),
+            SimpleNamespace(returncode=0, stdout=b"1\n2\n3\n", stderr=b""),
+            SimpleNamespace(returncode=0, stdout=b"1\n2\n3\nMEMORY,0\n", stderr=b""),
+        )
+        for failure in failures:
+            with self.subTest(failure=failure):
+                status, rows, commands, _, _ = self.run_psqf(.25, 16, failure=failure)
+                self.assertEqual(status, 1)
+                self.assertEqual(rows, [])
+                self.assertEqual(len(commands), 2)
+        status, rows, commands, _, _ = self.run_psqf(.25, "8,4", failure=failures[0])
+        self.assertEqual(status, 1)
+        self.assertEqual([row["k"] for row in rows], ["4"])
+        self.assertEqual(len(commands), 3)
+
+    def test_psqf_rejects_nonpositive_targets_before_execution(self):
+        for k in (0, -1):
+            with self.subTest(k=k):
+                status, rows, commands, builds, _ = self.run_psqf(.25, k)
+                self.assertEqual(status, 1)
+                self.assertEqual(rows, [])
+                self.assertEqual(commands, [])
+                self.assertEqual(builds, [])
 
     def test_main_uses_measured_peak_and_rejects_missing_peak(self):
         with tempfile.TemporaryDirectory() as directory:

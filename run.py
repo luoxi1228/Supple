@@ -39,8 +39,8 @@ EXPERIMENT_GROUPS: List[Dict[str, Any]] = [
     # },
     {
         "name": "group_p",
-        "modes": [1,2,3,4,5],
-        "p": [0.25, 0.0625, 0.015625, 0.00390625, 0.0009765625], # 1/4 to 1/1024
+        "modes": [2],
+        "p": [0.25, 0.0625], # 1/4 to 1/1024
         "n": [1048576],
         "k": [64],
         "k_select": 2,
@@ -53,10 +53,10 @@ EXPERIMENT_GROUPS: List[Dict[str, Any]] = [
     },
     {
         "name": "group_k",
-        "modes": [1,2,3,4,5],
+        "modes": [2],
         "p": [0.015625],
         "n": [1048576],
-        "k": [16,64,256,1024,4096],   # 16 to 4096
+        "k": [16,256,1024,4096],   # 16 to 4096
         "k_select": 2,
         "block_sizes": [16],
         "repeat": 3,
@@ -64,21 +64,21 @@ EXPERIMENT_GROUPS: List[Dict[str, Any]] = [
         "results_folder": "RESULTS",
         "overwrite": False,
         "offline_profile": False,
-    },
-    {
-        "name": "group_b",
-        "modes": [1,2,3,4,5],
-        "p": [0.015625],
-        "n": [1048576],
-        "k": [1],
-        "k_select": 1,
-        "block_sizes": [16,64,256,1024,4096], # 16 to 4096
-        "repeat": 3,
-        "warmup": 1,
-        "results_folder": "RESULTS",
-        "overwrite": False,
-        "offline_profile": False,
     }
+    # {
+    #     "name": "group_b",
+    #     "modes": [1,2,3,4,5],
+    #     "p": [0.015625],
+    #     "n": [1048576],
+    #     "k": [1],
+    #     "k_select": 1,
+    #     "block_sizes": [16,64,256,1024,4096], # 16 to 4096
+    #     "repeat": 3,
+    #     "warmup": 1,
+    #     "results_folder": "RESULTS",
+    #     "overwrite": False,
+    #     "offline_profile": False,
+    # }
 
 ]
 

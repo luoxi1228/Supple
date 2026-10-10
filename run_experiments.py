@@ -80,9 +80,9 @@ def parse_args():
   parser.add_argument("--modes", default=",".join(map(str, DEFAULT_MODE)), help="Comma-separated modes, e.g. 3,4")
   parser.add_argument("--n", default=",".join(map(str, DEFAULT_N)), help="Comma-separated N values")
   parser.add_argument("--p", default=",".join(map(str, DEFAULT_P)), help="Comma-separated P values (0 < P <= 1)")
-  parser.add_argument("--k", default=",".join(map(str, DEFAULT_K)), help="Comma-separated K values (used by modes 1/3/4/5/6/12/13)")
+  parser.add_argument("--k", default=",".join(map(str, DEFAULT_K)), help="Comma-separated K values (used by modes 1/2/3/4/5/6/12/13)")
   parser.add_argument("--k-select", type=int, choices=[1, 2], default=DEFAULT_K_SELECT,
-                      help="Modes 1/3/4/5/6/12/13 K selection: 1 => k=1/p, 2 => use --k list")
+                      help="Modes 1/2/3/4/5/6/12/13 K selection: 1 => k=1/p, 2 => use --k list")
   parser.add_argument("--block-sizes", default=",".join(map(str, DEFAULT_BLOCK_SIZE)), help="Comma-separated block sizes")
   parser.add_argument(
     "--repeat", type=int, default=DEFAULT_REPEAT,
@@ -423,9 +423,18 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None):
 def k_candidates_for(mode, sample_prob, k_values, k_select):
   if MODE_INFO[mode]["fixed_k"]:
     return [1]
-  if MODE_INFO[mode]["needs_k"] and k_select == 2:
+  if (MODE_INFO[mode]["needs_k"] or mode == 2) and k_select == 2:
     return k_values
   return [max(1, int(1.0 / sample_prob))]
+
+
+def psqf_batch_plan(n, sample_prob, k_value):
+  """Return calls per round and produced samples, including PSQF's fallback."""
+  m = sample_size(n, sample_prob)
+  # PSQF_SWO falls back to one full-dataset sample when N is not divisible by M.
+  samples_per_call = n // m if n % m == 0 else 1
+  calls = max(1, (k_value + samples_per_call - 1) // samples_per_call)
+  return calls, calls * samples_per_call
 
 
 def build_command(mode, n, block_size, sample_prob, k_value, repeat, warmup):
@@ -597,6 +606,9 @@ def main():
   if warmup < 0:
     print("WARMUP must be >= 0")
     return 1
+  if 2 in modes and args.k_select == 2 and any(k <= 0 for k in k_values):
+    print("Mode 2 requires each K to be > 0")
+    return 1
   for p_rate in p_values:
     if p_rate <= 0.0 or p_rate > 1.0:
       print("Each P must satisfy 0 < P <= 1")
@@ -637,34 +649,58 @@ def main():
               % (mode, mode_name, block_size, p_rate, n, m_value, k_value, heap_mb)
             )
 
+            calls_per_round = 1
+            if mode == 2:
+              calls_per_round, produced_samples = psqf_batch_plan(n, p_rate, k_value)
+              print(f"PSQF batching: target_k = {k_value}, calls_per_round = {calls_per_round}, "
+                    f"actual_samples_per_round = {produced_samples}")
+
             env = os.environ.copy()
             # Keep normal totals free of per-phase clock OCALLs, even if this
             # shell was used for a profiling run earlier.
             env.pop("ONLINE_PROFILE", None)
             env.pop("OFFLINE_PROFILE", None)
-            proc = subprocess.run(cmd, cwd=str(APP_DIR), env=env,
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if proc.returncode != 0:
-              had_failed_run = True
-              print("Program exited with non-zero status:", proc.returncode)
-              if proc.stderr:
-                print("stderr:\n", proc.stderr.decode("utf-8", errors="ignore"))
-              continue
+            parsed_calls = []
+            peak_bytes = 0
+            for _ in range(calls_per_round):
+              proc = subprocess.run(cmd, cwd=str(APP_DIR), env=env,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+              if proc.returncode != 0:
+                had_failed_run = True
+                print("Program exited with non-zero status:", proc.returncode)
+                if proc.stderr:
+                  print("stderr:\n", proc.stderr.decode("utf-8", errors="ignore"))
+                break
 
-            output = proc.stdout.decode("utf-8", errors="ignore")
-            parsed = parse_output(mode, output)
-            if parsed is None:
-              had_failed_run = True
-              print("Receieved unexpected output, this experiment run has failed. ONE MUST DEBUG!")
+              output = proc.stdout.decode("utf-8", errors="ignore")
+              parsed = parse_output(mode, output)
+              if parsed is None:
+                had_failed_run = True
+                print("Receieved unexpected output, this experiment run has failed. ONE MUST DEBUG!")
+                break
+
+              if mode in CSV_HEADER_MODES:
+                call_peak_bytes = parse_memory_peak(output)
+                if call_peak_bytes is None or call_peak_bytes == 0:
+                  had_failed_run = True
+                  print("Algorithm heap measurement is missing or invalid; skipping result")
+                  break
+                peak_bytes = max(peak_bytes, call_peak_bytes)
+              parsed_calls.append(parsed)
+
+            # A partial batch does not satisfy the requested sample count.
+            if len(parsed_calls) != calls_per_round:
               continue
+            parsed = parsed_calls[0]
+            if mode == 2 and calls_per_round > 1:
+              # Each invocation already averages REPEAT measured rounds after
+              # WARMUP. Summing those means equals averaging full-batch totals.
+              parsed = (f"{math.fsum(float(call[0]) for call in parsed_calls):.6f}",
+                        f"{math.fsum(float(call[1]) for call in parsed_calls):.6f}",
+                        sum(call[2] for call in parsed_calls))
 
             recorded_memory_mib = heap_mb
             if mode in CSV_HEADER_MODES:
-              peak_bytes = parse_memory_peak(output)
-              if peak_bytes is None or peak_bytes == 0:
-                had_failed_run = True
-                print("Algorithm heap measurement is missing or invalid; skipping result")
-                continue
               recorded_memory_mib = peak_bytes / (1024.0 * 1024.0)
               print(f"Measured algorithm heap peak: {peak_bytes} bytes ({recorded_memory_mib:.6f} MiB)")
 

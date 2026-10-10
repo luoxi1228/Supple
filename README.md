@@ -154,11 +154,22 @@ The remaining mode IDs are unchanged by the FFOS rename; historical CSV data is 
 
 ### `k` Selection Behavior
 
-- Modes `1`, `3`, `4`, `5`, `12`, and `13`:
+- Modes `1`, `2`, `3`, `4`, `5`, `6`, `12`, and `13`:
     - `k-select=1`: use derived `k = max(1, int(1/p))`
     - `k-select=2`: sweep values from `--k`
-- Mode `2`: always uses `k = max(1, int(1/p))`
 - Modes `10` and `11`: fixed `k = 1`
+
+Mode `2` produces `s = n / m` sample groups per call, where
+`m = max(1, int(n*p))` (normally `s = 1/p`). For each target `k`, the runner
+makes `ceil(k/s)` calls, with at least one call, so the total is at least `k`.
+For example, `p=1/4,k=64` needs 16 calls; `p=1/64,k=16` needs just one call,
+producing 64 groups. PSQF's existing non-divisible `n % m != 0` fallback
+produces one full-dataset sample per call and is counted accordingly.
+Each call retains the configured `repeat` and `warmup`. The CSV records the
+target `k`, summed mean ECALL/algorithm times and swap counts, and the maximum
+measured heap peak across calls. Logs report the call count and actual sample
+group count per round. This batching is performed by `run_experiments.py`;
+the underlying `application 2` command keeps its existing single-call CLI.
 
 ------------------------------------------------------------------------
 

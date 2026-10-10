@@ -19,6 +19,7 @@ def main(build):
     # allocation estimates, subprocess execution, parsing and CSV I/O are real.
     run = subprocess.run
     outputs = {}
+    psqf_outputs = []
 
     def process(command, **kwargs):
         if command[0] == "make":
@@ -26,6 +27,8 @@ def main(build):
         result = run(command, **kwargs)
         if kwargs["env"].get("OFFLINE_PROFILE") != "1":
             outputs[int(command[1])] = result.stdout.decode()
+            if int(command[1]) == 2:
+                psqf_outputs.append((command, result.stdout.decode()))
         return result
 
     with tempfile.TemporaryDirectory(prefix="supple-memory-csv-") as directory:
@@ -107,7 +110,39 @@ def main(build):
                    "2", "2", "1", "0"]
         result = run(command, cwd=build, env=env, capture_output=True, text=True)
         assert result.returncode != 0
+        # Verify real PSQF batching, including below/equal/above one call's
+        # capacity, a non-multiple target, and the non-divisible fallback.
+        for case, (n, p, targets, calls) in enumerate((
+                (256, ".25", "2,4,9", (1, 1, 3)),
+                (64, ".3", "3", (3,)))):
+            psqf_outputs.clear()
+            batch_results = directory / f"psqf-batches-{case}"
+            args = ["run_experiments.py", "--modes", "2", "--n", str(n), "--p", p,
+                    "--k", targets, "--k-select", "2", "--block-sizes", "24",
+                    "--repeat", "2", "--warmup", "1", "--results-folder", str(batch_results)]
+            with mock.patch.object(experiments, "APP_DIR", build), \
+                 mock.patch.object(experiments, "ENCLAVE_CONFIG", config), \
+                 mock.patch.object(experiments.subprocess, "run", side_effect=process), \
+                 mock.patch.object(sys, "argv", args):
+                assert experiments.main() == 0
+            assert len(psqf_outputs) == sum(calls)
+            with (batch_results / "PSQF_SWO.csv").open() as source:
+                rows = list(csv.DictReader(source))
+            assert [row["k"] for row in rows] == targets.split(",")
+            offset = 0
+            for row, count in zip(rows, calls):
+                batch = psqf_outputs[offset:offset + count]
+                values = [experiments.parse_output(2, output) for _, output in batch]
+                for command, _ in batch:
+                    assert command[-2:] == ["2", "1"]
+                assert abs(float(row["ecall_time_ms"]) - sum(float(v[0]) for v in values)) < 1e-6
+                assert abs(float(row["ptime_ms"]) - sum(float(v[1]) for v in values)) < 1e-6
+                assert int(row["oswaps"]) == sum(v[2] for v in values)
+                peak = max(experiments.parse_memory_peak(output) for _, output in batch)
+                assert float(row["algorithm_heap_peak_mib"]) == peak / 1048576
+                offset += count
     print("PASS: real application, measured CSVs, legacy backups and offline-profile compatibility")
+    print("PASS: real PSQF sample-count batching and aggregated metrics")
 
 
 if __name__ == "__main__":
