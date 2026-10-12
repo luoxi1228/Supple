@@ -1,3 +1,4 @@
+.DEFAULT_GOAL := all
 #
 # Copyright (C) 2011-2017 Intel Corporation. All rights reserved.
 #
@@ -133,7 +134,7 @@ endif
 Crypto_Library_Name := sgx_tcrypto
 SGXSSL_INCLUDE_PATH := /opt/intel/sgxssl/include/
 
-Enclave_Cpp_Files := Enclave/Enclave.cpp Enclave/utils.cpp Enclave/MemoryProfile.cpp Enclave/ORShuffle/RecursiveShuffle.cpp \
+Enclave_Cpp_Files := Enclave/Enclave.cpp Enclave/utils.cpp Enclave/ThreadPool.cpp Enclave/MemoryProfile.cpp Enclave/ORShuffle/RecursiveShuffle.cpp \
 		Enclave/ObliviousPrimitives.cpp Enclave/ORCompaction/TightCompaction.cpp Enclave/ORCompaction/TightCompaction_v2.cpp \
 		Enclave/SubSample/SubSample.cpp Enclave/Baseline/SWO/PSQF_SWO.cpp \
 		Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.cpp \
@@ -141,7 +142,7 @@ Enclave_Cpp_Files := Enclave/Enclave.cpp Enclave/utils.cpp Enclave/MemoryProfile
 		Enclave/SubSample_v2/FFOS_C/FFOS_C.cpp Enclave/SubSample_v2/FFOS_C/helper.cpp \
 		Enclave/SubSample_v2/OFR/OFR.cpp Enclave/SubSample_v2/OFR/helper.cpp Enclave/SubSample_v2/OFR/OFRBenchmark.cpp \
 		Enclave/SubSample_v2/FFOS_FR/FFOS_FR.cpp \
-		Enclave/SubSample_v2/FFOS_FR_Opt/FFOS_FR_Opt.cpp \
+		Enclave/SubSample_v2/FFOS_FR_Par/FFOS_FR_Par.cpp \
 		$(wildcard Enclave/Edger8rSyntax/*.cpp) $(wildcard Enclave/TrustedLibrary/*.cpp)
 
 Enclave_Include_Paths := -IInclude -IEnclave -I$(SGX_SDK)/include -I$(SGX_SDK)/include/libcxx -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/stlport -I$(SGXSSL_INCLUDE_PATH)
@@ -179,23 +180,32 @@ Enclave_Cpp_Objects := $(Enclave_Cpp_Files:.cpp=.o)
 
 Enclave_Name := enclave.so
 Signed_Enclave_Name := enclave.signed.so
-Enclave_Config_File := Enclave/Enclave.config.xml
+Enclave_Config_File := .build/Enclave.config.xml
+CPU_CAPACITY ?= auto
+
+.PHONY: cpu-config-force
+cpu-config-force:
+
+.build/Enclave.config.xml .build/EnclaveCapacity.hpp &: cpu-config-force cpu_budget.py Enclave/Enclave.config.xml
+	@python3 cpu_budget.py --configure Enclave/Enclave.config.xml --output-dir .build --capacity $(CPU_CAPACITY)
+
+$(Enclave_Cpp_Objects): .build/EnclaveCapacity.hpp
 
 ifeq ($(SGX_MODE), HW)
 ifeq ($(SGX_DEBUG), 1)
-	Build_Mode = HW_DEBUG
+Build_Mode = HW_DEBUG
 else ifeq ($(SGX_PRERELEASE), 1)
-	Build_Mode = HW_PRERELEASE
+Build_Mode = HW_PRERELEASE
 else
-	Build_Mode = HW_RELEASE
+Build_Mode = HW_RELEASE
 endif
 else
 ifeq ($(SGX_DEBUG), 1)
-	Build_Mode = SIM_DEBUG
+Build_Mode = SIM_DEBUG
 else ifeq ($(SGX_PRERELEASE), 1)
-	Build_Mode = SIM_PRERELEASE
+Build_Mode = SIM_PRERELEASE
 else
-	Build_Mode = SIM_RELEASE
+Build_Mode = SIM_RELEASE
 endif
 endif
 
@@ -240,7 +250,7 @@ endif
 
 FFOS_Edl_Files := Enclave/SubSample_v2/FFOS_C/FFOS_C.edl \
                   Enclave/SubSample_v2/FFOS_FR/FFOS_FR.edl \
-                  Enclave/SubSample_v2/FFOS_FR_Opt/FFOS_FR_Opt.edl
+                  Enclave/SubSample_v2/FFOS_FR_Par/FFOS_FR_Par.edl
 
 Untrusted/Enclave_u.c: $(SGX_EDGER8R) Enclave/Enclave.edl $(FFOS_Edl_Files) Enclave/Baseline/SWO/PSQF_SWO.edl Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.edl Enclave/Baseline/Compaction_based/CompactionBasedSWO.edl
 	@cd Untrusted && $(SGX_EDGER8R) --untrusted ../Enclave/Enclave.edl --search-path ../Enclave --search-path $(SGX_SDK)/include
@@ -259,10 +269,10 @@ $(App_Name): Untrusted/Enclave_u.o $(App_Cpp_Objects)
 	@$(CXX) $^ -shared -o libOSort.so $(App_Link_Flags)
 	@echo "LINK =>  $@"
 	cp libOSort.so Application/
-	$(MAKE) -C Application/
+	$(MAKE) -C Application/ SGX_MODE=$(SGX_MODE)
 
 .config_$(Build_Mode)_$(SGX_ARCH):
-	@rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) Untrusted/Enclave_u.* $(Enclave_Cpp_Objects) Enclave/Enclave_t.*
+	@rm -f .config_*
 	@touch .config_$(Build_Mode)_$(SGX_ARCH)
 
 ######## Enclave Objects ########
@@ -286,7 +296,7 @@ Enclave/%.o: Enclave/%.cpp $(Enclave_Asm_Objects)
 Enclave/Baseline/Compaction_based/CompactionBasedSWO.o: Enclave/Baseline/Compaction_based/CompactionBasedSWO.hpp Enclave/SubSample/SubSample.hpp
 Enclave/ObliviousPrimitives.o: Enclave/ORCompaction/TightCompaction_v2.hpp Enclave/ORCompaction/TightCompaction_v2.tcc
 Enclave/SubSample_v2/FFOS_FR/FFOS_FR.o: Enclave/SubSample_v2/FFOS_FR/FFOS_FR.hpp Enclave/SubSample_v2/OFR/OFR.hpp
-Enclave/SubSample_v2/FFOS_FR_Opt/FFOS_FR_Opt.o: Enclave/SubSample_v2/FFOS_FR_Opt/FFOS_FR_Opt.hpp Enclave/SubSample_v2/FFOS_FR/FFOS_FR.hpp
+Enclave/SubSample_v2/FFOS_FR_Par/FFOS_FR_Par.o: Enclave/SubSample_v2/FFOS_FR_Par/FFOS_FR_Par.hpp Enclave/SubSample_v2/FFOS_FR/FFOS_FR.hpp
 Enclave/SubSample_v2/OFR/OFR.o: Enclave/SubSample_v2/OFR/OFR.hpp Enclave/SubSample_v2/OFR/FourGateSSE2.hpp Enclave/oasm_lib.tcc
 
 Enclave/asm/%.s: Enclave/%.cpp $(Enclave_Asm_Objects)
@@ -311,3 +321,12 @@ $(Signed_Enclave_Name): $(Enclave_Name) $(Enclave_Config_File)
 clean:
 	rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) Untrusted/Enclave_u.* $(Enclave_Cpp_Objects) Enclave/Enclave_t.* Enclave/*.o Enclave/ORCompaction/*.o Enclave/ORShuffle/*.o
 	cd Application && $(MAKE) clean
+
+Enclave/SubSample_v2/FFOS_FR/FFOS_FR.o: Enclave/SubSample_v2/FFOS_FR/ParallelPlan.tcc Enclave/SubSample_v2/FFOS_FR/ParallelRead.tcc Enclave/SubSample_v2/PackedBoundary.hpp Enclave/ThreadPool.hpp
+
+Enclave/ThreadPool.o: Enclave/ThreadPool.hpp
+Untrusted/Untrusted.o: Untrusted/CpuBudget.hpp Untrusted/SS.hpp
+Enclave/SubSample_v2/OFR/OFR.o Enclave/SubSample_v2/FFOS_C/helper.o: Enclave/SubSample_v2/PackedBoundary.hpp Enclave/SubSample_v2/OFR/PackedControls.hpp
+
+# A mode change invalidates objects without deleting files under parallel make.
+$(App_Cpp_Objects) $(Enclave_Cpp_Objects) Untrusted/Enclave_u.o Enclave/Enclave_t.o Untrusted/Enclave_u.c Enclave/Enclave_t.c: .config_$(Build_Mode)_$(SGX_ARCH)

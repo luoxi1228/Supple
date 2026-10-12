@@ -21,6 +21,7 @@
 #include <atomic>
 #include <thread>
 #include <array>
+#include "../../Untrusted/CpuBudget.hpp"
 #include "../../Globals.hpp"
 #include "../../Enclave/foav.h"
 #include "../../Enclave/oasm_lib.h"
@@ -37,10 +38,9 @@ struct PRB_buffer
     }
   }
 };
-static PRB_buffer pool[16];
-static PRB_buffer *PRB_pool = pool;
-static thread_local size_t g_thread_id = 0;
-static void PRB_pool_init(int) {}
+static std::vector<PRB_buffer> pool(1);
+static PRB_buffer *PRB_pool = pool.data();
+static void PRB_pool_init(int threads) { pool.resize(std::max(1, threads)); PRB_pool = pool.data(); }
 static void PRB_pool_shutdown() {}
 static void ocall_clock(long *t) { *t = 0; }
 static size_t decryptBuffer(unsigned char *src, uint64_t n, size_t width,
@@ -62,26 +62,23 @@ static uint64_t pow2_lt(uint64_t n)
   while (power <= (n - 1) / 2) power *= 2;
   return power;
 }
-// Host thread-pool adapter; worker IDs match the enclave thread-pool contract.
-using threadid_t = size_t;
-static std::array<std::thread, 16> workers;
+// Exercise the production pthread pool, not a spawn-per-job replacement.
 static std::atomic<size_t> dispatched{0};
-static int threadpool_init(size_t) { return 0; }
-static void threadpool_shutdown() {}
-static void threadpool_dispatch(size_t id, void *(*fn)(void *), void *arg)
-{
-  assert(id < workers.size() && !workers[id].joinable());
-  ++dispatched;
-  workers[id] = std::thread([=] {
-    g_thread_id = id;
-    rng.seed(20260921 + static_cast<unsigned>(id));
-    fn(arg);
-  });
+static int fail_worker_create_after = -1;
+static int HostWorkerCreate(pthread_t *thread, const pthread_attr_t *attr,
+                            void *(*start)(void *), void *arg) {
+  if (fail_worker_create_after == 0) return EAGAIN;
+  if (fail_worker_create_after > 0) --fail_worker_create_after;
+  return pthread_create(thread, attr, start, arg);
 }
-static void threadpool_join(size_t id, void **)
-{
-  assert(workers[id].joinable());
-  workers[id].join();
+#define SUPPLE_THREADPOOL_CREATE HostWorkerCreate
+#define SUPPLE_THREADPOOL_DISPATCH_HOOK() (++dispatched)
+#include "../../Enclave/ThreadPool.cpp"
+#undef SUPPLE_THREADPOOL_DISPATCH_HOOK
+#undef SUPPLE_THREADPOOL_CREATE
+static size_t host_cpu_budget = 0;
+static void ocall_ffos_fr_cpu_budget(size_t *budget) {
+  *budget = host_cpu_budget ? host_cpu_budget : supple_cpu::Available();
 }
 static unsigned long printf_with_rtclock(const char *, ...) { return 0; }
 static unsigned long printf_with_rtclock_diff(unsigned long, const char *, ...) { return 0; }
@@ -93,9 +90,11 @@ static unsigned long printf_with_rtclock_diff(unsigned long, const char *, ...) 
 #undef TightCompact_v2
 #undef TightCompact_v2_parallel
 
+static std::atomic<bool> throw_compact_on_worker{false};
 static std::atomic<size_t> compact_calls{0}, compact_items{0}, shuffle_calls{0};
 void TightCompact_v2(unsigned char *data, size_t n, size_t width, bool *flags)
 {
+  if (throw_compact_on_worker && g_thread_id != 0) throw std::runtime_error("Injected Compact worker exception");
   ++compact_calls;
   compact_items += n;
   HostTightCompact(data, n, width, flags);

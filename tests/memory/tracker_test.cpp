@@ -10,6 +10,8 @@
 #include <new>
 #include <stdexcept>
 #include <vector>
+#include <thread>
+#include <atomic>
 
 extern "C" {
 void *__wrap_malloc(size_t);
@@ -156,6 +158,23 @@ int main(int argc, char **argv) {
     assert(unwound.memory_profile_status == MEMORY_PROFILE_INVALID);
     assert(unwound.algorithm_heap_peak_bytes == 100);
     Expect(Measure([] {}), 0); // destructors ran before the scope finished
+  } else if (std::strcmp(test, "parallel") == 0) {
+    for (size_t repeat = 0; repeat < 5; ++repeat) {
+      const auto ret = Measure([] {
+        std::atomic<size_t> ready{0};
+        std::vector<std::thread> workers;
+        for (size_t i = 0; i < 32; ++i) workers.emplace_back([&] {
+          void *p = __wrap_calloc(17, 101);
+          ++ready;
+          while (ready.load() != 32) std::this_thread::yield();
+          __wrap_free(p);
+        });
+        for (auto &worker : workers) worker.join();
+      });
+      assert(ret.memory_profile_status == MEMORY_PROFILE_VALID);
+      assert(ret.algorithm_heap_peak_bytes >= 32 * 17 * 101);
+      Expect(Measure([] {}), 0);
+    }
   } else if (std::strcmp(test, "failure") == 0) {
     auto ret = Measure([] { fail_next = true; assert(!__wrap_malloc(100)); });
     assert(ret.memory_profile_status == MEMORY_PROFILE_INVALID);

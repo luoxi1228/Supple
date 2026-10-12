@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+#include "../PackedBoundary.hpp"
 
 struct FrontierNode
 {
@@ -88,7 +89,7 @@ void CompactMarkToWorkspaceAndControl(const size_t *mark,
     size_t slice_bits,
     std::vector<uint8_t> &C,
     size_t bit_pos,
-    FfosCMarkWorkspace &ws);
+    FfosCMarkWorkspace &ws, supple_parallel::PackedBoundary *boundary = nullptr);
 
 size_t FfosCNodeCapacity(size_t n, size_t m, size_t k);
 

@@ -62,7 +62,7 @@ enclave {
     from "SubSample_v2/FFOS_C/FFOS_C.edl" import *;
     from "SubSample_v2/OFR/OFR.edl" import *;
     from "SubSample_v2/FFOS_FR/FFOS_FR.edl" import *;
-    from "SubSample_v2/FFOS_FR_Opt/FFOS_FR_Opt.edl" import *;
+    from "SubSample_v2/FFOS_FR_Par/FFOS_FR_Par.edl" import *;
 
     /*
      * ocall_print_string - invokes OCALL to display string buffer inside the enclave.
@@ -92,6 +92,7 @@ enclave {
     unsigned long ocall_print_string_with_rtclock_diff([in, string] const char *str, unsigned long before);
     unsigned char* untrustedMemAllocate(uint64_t size);
     void untrustedMemFree([user_check] unsigned char *mem);
+    size_t ocall_ffos_fr_cpu_budget();
     long ocall_clock();
     double ocall_wallclock(int start_or_stop);
   };

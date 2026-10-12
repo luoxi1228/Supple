@@ -1,10 +1,12 @@
 #include "../ffos_c/host_support.hpp"
 #include "../../Enclave/SubSample_v2/FFOS_C/helper.cpp"
 #include "../../Enclave/SubSample_v2/FFOS_C/FFOS_C.cpp"
+#ifndef FFOS_FR_EXTERNAL_OFR
 #include "../../Enclave/SubSample_v2/OFR/helper.cpp"
 #include "../../Enclave/SubSample_v2/OFR/OFR.cpp"
+#endif
 #include "../../Enclave/SubSample_v2/FFOS_FR/FFOS_FR.cpp"
-#include "../../Enclave/SubSample_v2/FFOS_FR_Opt/FFOS_FR_Opt.cpp"
+#include "../../Enclave/SubSample_v2/FFOS_FR_Par/FFOS_FR_Par.cpp"
 
 #include <cassert>
 #include <cstdio>
@@ -85,7 +87,7 @@ static void Verify(size_t n, size_t m, const Samples &samples, size_t width)
       data.data(), controls, frontier, n, m, k, width);
   assert(shuffle_calls == before_shuffle);
   CheckSamples(result, data, samples, m, width);
-  assert(FFOS_FR_OptApply(data.data(), controls, frontier, n, m, k, width) == result);
+  assert(FFOS_FR_ParApply(data.data(), controls, frontier, n, m, k, width) == result);
 
   // Both streams can start at nonzero offsets without changing nearby controls.
   const size_t swo_offset = 3;
@@ -427,14 +429,15 @@ int main()
                encrypted.data(), &ret);
   CheckSamples(encrypted, data, samples, m, width);
   rng.seed(731);
-  assert(FFOS_FR_Opt(data.data(), n, m, k, width) == encrypted);
+  assert(FFOS_FR_Par(data.data(), n, m, k, width) == encrypted);
   rng.seed(731);
-  DecFFOS_FR_Opt(const_cast<unsigned char *>(data.data()), n, m, k, width,
-                  encrypted.data(), &ret);
+  DecFFOS_FR_Par(const_cast<unsigned char *>(data.data()), n, m, k, width,
+                  encrypted.data(), 1, &ret);
   CheckSamples(encrypted, data, samples, m, width);
   std::printf("PASS: %zu FFOS_FR cases; %zu single-word tag cases; "
               "%zu guarded prepared output-view cases; "
               "%zu invalid plans rejected before "
               "writes; membership, both control streams, offsets and ECALL\n",
               checked, one_word_tag_cases, prepared_view_cases, rejected_plans);
+  return 0;
 }

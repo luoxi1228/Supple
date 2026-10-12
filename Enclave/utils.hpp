@@ -113,33 +113,7 @@
   void swapBuckets(unsigned char *bkt1, unsigned char *bkt2, unsigned char *temp_bucket, size_t bucket_size);
 
 
-  /*** Thread pool implementation ***/
-
-  /* Implements a restricted-model thread pool.  The restriction is that
-   * every thread is the "parent" of a number of other threads (and no
-   * thread has more than one parent).  Each thread can be dispatched and
-   * joined only by its parent, so there's no contention on the dispatch
-   * and join inter-thread communication.  A parent thread has to specify
-   * the exact thread id of the child thread it dispatches work to. */
-
-  typedef size_t threadid_t;
-  extern thread_local threadid_t g_thread_id;
-
-  /* Create the threadpool, with numthreads-1 additional threads (numbered
-   * 1 through numthreads-1) in addition to the current "main" thread
-   * (numbered 0). Returns 0 on success, -1 on failure. It is allowed, but
-   * not very useful, to pass 1 here. */
-  int threadpool_init(threadid_t numthreads);
-
-  /* Ask all the threads to terminate, wait for that to happen, and clean
-   * up. */
-  void threadpool_shutdown();
-
-  /* Dispatch some work to a particular thread in the thread pool. */
-  void threadpool_dispatch(threadid_t threadid, void *(*func)(void*), void *data);
-
-  /* Join a thread */
-  void threadpool_join(threadid_t threadid, void **resp);
+  #include "ThreadPool.hpp"
 
   // PRB = PseudoRandomBytes
   #ifdef USE_PRB

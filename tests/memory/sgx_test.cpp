@@ -9,6 +9,7 @@
 #include <vector>
 #include "../../Untrusted/Enclave_u.h"
 #include "../../Application/gcm.h"
+#include "../../Untrusted/CpuBudget.hpp"
 
 struct Enclave {
   sgx_enclave_id_t id = 0;
@@ -25,7 +26,7 @@ struct Enclave {
 };
 
 static double Run(Enclave &enclave, int mode, size_t n, size_t m, size_t k,
-                  size_t width, bool tracking, size_t *peak, double *ptime) {
+                  size_t width, bool tracking, size_t *peak, double *ptime, size_t threads = 0) {
   const size_t encrypted_width = width + 28;
   const size_t output_blocks = mode == 2 ? n : m * k;
   std::vector<unsigned char> input(n * encrypted_width), output(output_blocks * encrypted_width);
@@ -48,13 +49,14 @@ static double Run(Enclave &enclave, int mode, size_t n, size_t m, size_t k,
     case 2: status = DecPSQF_SWO(enclave.id, input.data(), n, m, encrypted_width, output.data(), &ret); break;
     case 4: status = DecFFOS_C(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
     case 5: status = DecFFOS_FR(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
-    case 6: status = DecFFOS_FR_Opt(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
+    case 6: status = DecFFOS_FR_Par(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), threads, &ret); break;
     case 1: status = DecShuffleBasedSWO(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
     case 3: status = DecCompactionBasedSWO(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
   }
   const double elapsed = std::chrono::duration<double, std::milli>(
       std::chrono::steady_clock::now() - start).count();
   assert(status == SGX_SUCCESS);
+  assert(mode != 6 || (ret.parallel_status == 0 && ret.effective_threads >= 1));
   if (tracking) {
     if (ret.memory_profile_status != MEMORY_PROFILE_VALID)
       std::fprintf(stderr, "invalid tracker mode=%d n=%zu m=%zu k=%zu\n", mode, n, m, k);
@@ -145,7 +147,7 @@ int main(int argc, char **argv) {
       case 2: DecPSQF_SWO(enclave.id, buffer, 0, 0, 52, buffer, &bad); break;
       case 4: DecFFOS_C(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
       case 5: DecFFOS_FR(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
-      case 6: DecFFOS_FR_Opt(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
+      case 6: DecFFOS_FR_Par(enclave.id, buffer, 0, 0, 1, 52, buffer, 1, &bad); break;
       case 1: DecShuffleBasedSWO(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
       case 3: DecCompactionBasedSWO(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
     }
@@ -157,7 +159,7 @@ int main(int argc, char **argv) {
       case 2: DecPSQF_SWO(enclave.id, buffer, 1, 1, 52, buffer, &bad); break;
       case 4: DecFFOS_C(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
       case 5: DecFFOS_FR(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
-      case 6: DecFFOS_FR_Opt(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
+      case 6: DecFFOS_FR_Par(enclave.id, buffer, 1, 1, 1, 52, buffer, 1, &bad); break;
       case 1: DecShuffleBasedSWO(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
       case 3: DecCompactionBasedSWO(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
     }
@@ -172,9 +174,20 @@ int main(int argc, char **argv) {
       for (int round = 0; round < 3; ++round) {
         Run(enclave, 5, n, 2, 32, width, true, &scalar_peak, &ptime);
         Run(enclave, 6, n, 2, 32, width, true, &opt_peak, &ptime);
-        assert(scalar_peak == opt_peak);
+        assert(scalar_peak > 0 && opt_peak > 0);
       }
     }
+  for (size_t width : {4,8,16,24,40,256}) {
+    Enclave enclave(argv[1]);
+    for (size_t k : {31,64,65})
+      for (size_t threads : {0,1,3}) {
+        if (threads > supple_cpu::Available()) continue;
+        size_t peak=0;
+        double ptime=0;
+        for (int repeat=0;repeat<3;++repeat)
+          Run(enclave,6,8192,128,k,width,true,&peak,&ptime,threads);
+      }
+  }
   // Specialized and generic compaction dispatch widths, tiny inputs and
   // both extreme sample sizes. Use fresh enclaves after failures.
   for (size_t width : {4, 8, 12, 16, 24, 32, 40, 64}) {

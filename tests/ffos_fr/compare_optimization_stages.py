@@ -71,7 +71,7 @@ def main():
                 offline, online = (("control_ms", "apply_ms") if backend == "native"
                                    else ("offline_ms", "online_ms"))
                 for key, ffos_fr in data.items():
-                    if key[-1] not in ("FFOS_FR", "FFOS_FR_Opt"):
+                    if key[-1] not in ("FFOS_FR", "FFOS_FR_Opt", "FFOS_FR_Par"):
                         continue
                     ffos_c_key = key[:-1] + ("FFOS_C",)
                     ffos_c = data[ffos_c_key]

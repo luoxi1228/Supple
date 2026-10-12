@@ -75,11 +75,13 @@ size_t OFRControlWriteAndRouteNormalized(
     std::vector<uint8_t> &tags, PackedControls &controls,
     size_t *rows, size_t words_per_row, size_t n,
     size_t n_left, size_t n_right, size_t position, size_t control_count,
-    std::vector<uint8_t> *feature_scratch = NULL);
+    std::vector<uint8_t> *feature_scratch = NULL,
+    supple_parallel::PackedBoundary *boundary = NULL);
 size_t OFRControlWritePostOrderAndRouteNormalized(
     std::vector<uint8_t> &tags, PackedControls &controls,
     size_t *rows, size_t words_per_row, size_t n,
-    size_t n_left, size_t n_right, size_t position, size_t control_count);
+    size_t n_left, size_t n_right, size_t position, size_t control_count,
+    supple_parallel::PackedBoundary *boundary = NULL);
 } // namespace detail
 
 // Convenience wrapper that preserves tags and materializes both child arrays.

@@ -1,4 +1,4 @@
-# FFOS_FR and FFOS_FR_Opt regression tests
+# FFOS_FR and FFOS_FR_Par regression tests
 
 Run from the repository root:
 
@@ -103,7 +103,7 @@ python3 tests/ffos_fr/run_optimization_stage.py --stage workspace \
 ```
 
 Default measurements use two warmups and seven measured rounds, alternating
-FFOS_C/FFOS_FR/FFOS_FR_Opt each round. The native primary matrix covers 8 B, P=1/16,
+FFOS_C/FFOS_FR/FFOS_FR_Par each round. The native primary matrix covers 8 B, P=1/16,
 K=16, N=2^16/18/20/22/24, plus 16 B, P=1/64, K=64, N=2^20/22.
 Shape tests include compaction, equal capacity, frontier and mixed nodes with
 16/64/256 B records. A process lock serializes benchmark runs and builds.
@@ -138,7 +138,7 @@ offline workspace destruction are included in actual offline time.
 Recorded stages under `RESULTS/ofr_optimization_20261001` can be restored with
 `--from-stage RESULTS/ofr_optimization_20261001/stage_03_tiled` (or another
 stage directory). The runner applies that stage over its baseline commit and
-uses the same current benchmark harness with test-only aliases for the archived API. Archived source and result files retain their original names; current method labels are `FFOS_C`, `FFOS_FR` and `FFOS_FR_Opt`. Restored historical sources retain the two-method comparison. The comparison reader accepts both generations of labels. `compare_optimization_stages.py`
+uses the same current benchmark harness with test-only aliases for the archived API. Archived source and result files retain their original names; current method labels are `FFOS_C`, `FFOS_FR` and `FFOS_FR_Par`. Restored historical sources retain the two-method comparison. The comparison reader accepts both generations of labels. `compare_optimization_stages.py`
 computes medians from raw rounds; median offline plus median online can differ
 from the median of each round's total. SIM verifies the enclave build,
 encrypted ECALL flow and results in the simulated runtime, and permits timing
@@ -159,7 +159,7 @@ an existing primary CSV. Completed companions are also refused.
 ## Per-gate and optimized FR modes
 
 Mode 5 (`FFOS_FR`) uses scalar assembly OFork for every online gate. Mode 6
-(`FFOS_FR_Opt`) enables four-gate SSE2 for balanced postorder B=8/16 spans.
+(`FFOS_FR_Par`) enables four-gate SSE2 for balanced postorder B=8/16 spans.
 Control generation, packing and workspaces are shared. `gate_backend_test.cpp`
 links the real production OFR translation unit and checks scalar/batch call
 counts, all four control values, offsets, guard bytes, identical outputs and
@@ -174,3 +174,21 @@ Archived source snapshots and results are left unchanged.
 Stage reports add a `method` column to distinguish FR from FR_Opt; existing
 `ffos_fr_*` metric columns describe the variant named by that row. Legacy
 Supple/OFRSupple labels continue to be normalized when reading old inputs.
+
+
+## Dynamic parallel regression
+
+Run `ASAN_OPTIONS=detect_leaks=0 bash tests/ffos_fr/run_parallel_tests.sh`.
+The host harness uses the production pthread pool and links real OFR/SSE2 code.
+It lowers only the test scheduling threshold to cover shared partial tape bytes,
+odd branches and multiword membership with small deterministic cases. Budgets
+1/2/3/9/17/32/64/auto must produce the serial tape, metadata and complete output.
+It also checks preflight rejection before writes, partial worker creation failure,
+exception joins, nested OSWAP reduction and CPU-probe fixtures.
+
+Use `SANITIZER=thread bash tests/ffos_fr/run_parallel_tests.sh` for the separate
+TSan run. `tests/memory/run_tests.sh` includes simultaneous worker allocations,
+nested allocator entry and complete release across repeated rounds.
+`run_parallel_benchmark.py --threads auto` tests 1,2,4,...,available CPUs, including
+the final non-power-of-two budget. Its one-thread Par rows are the SIMD baseline.
+Profiling columns on Par rows represent accumulated work across threads.

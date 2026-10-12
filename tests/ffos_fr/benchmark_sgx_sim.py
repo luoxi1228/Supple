@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run FFOS_C (4), scalar FFOS_FR (5) and FFOS_FR_Opt (6) benchmarks.
+"""Run FFOS_C (4), scalar FFOS_FR (5) and FFOS_FR_Par (6) benchmarks.
 
 Build and sign a SIM enclave first; this script only runs the application.
 Each application invocation includes --warmup warm-up rounds and averages
@@ -55,6 +55,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--application", type=Path, required=True,
                         help="built Application/application (with a SIM enclave beside it)")
+    parser.add_argument("--threads", default="auto", help="auto or a positive mode-6 budget")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repeat", type=int, default=7)
     parser.add_argument("--warmup", type=int, default=2)
@@ -83,6 +84,7 @@ def main():
         parser.error(f"unknown cases: {', '.join(sorted(unknown))}")
 
     env = os.environ.copy()
+    env["FFOS_FR_THREADS"] = args.threads
     env.pop("ONLINE_PROFILE", None)
     env.pop("OFFLINE_PROFILE", None)
     sdk = Path(env.get("SGX_SDK", "/opt/intel/sgxsdk"))
@@ -106,7 +108,7 @@ def main():
                                      text=True, capture_output=True, timeout=180,
                                      check=True)
                 lines = [line for line in run.stdout.strip().splitlines()
-                         if not line.startswith("MEMORY,")]
+                         if not line.startswith(("MEMORY,", "PARALLEL,"))]
                 if len(lines) != 5 + int(args.profile) + int(args.offline_profile):
                     raise RuntimeError(f"unexpected output for {name}, mode {mode}: "
                                        f"{run.stdout!r}; stderr={run.stderr!r}")
@@ -122,24 +124,29 @@ def main():
                 phases = []
                 if args.profile:
                     tokens = next((line.split(",") for line in lines[5:]
-                                   if line.startswith("PROFILE,")), [])
-                    if len(tokens) != 6 or tokens[0] != "PROFILE":
+                                   if line.startswith(("PROFILE,", "PAR_PROFILE,"))), [])
+                    if len(tokens) != (5 if mode == 6 else 6):
                         raise RuntimeError(f"invalid online phase output: {lines[5:]!r}")
                     phases = [float(token) for token in tokens[1:]]
-                    if abs(sum(phases) - values[3]) > 0.05:
+                    if mode == 6: phases += [""]  # no wall-clock residual for accumulated work
+                    if mode != 6 and abs(sum(phases) - values[3]) > 0.05:
                         raise RuntimeError(f"phase sum differs from online time: {phases}")
                 offline_phases = []
                 if args.offline_profile:
                     tokens = next((line.split(",") for line in lines[5:]
-                                   if line.startswith("OFFLINE_PROFILE,")), [])
-                    if len(tokens) != 13:
+                                   if line.startswith(("OFFLINE_PROFILE,", "PAR_OFFLINE_PROFILE,"))), [])
+                    if len(tokens) != (12 if mode == 6 else 13):
                         raise RuntimeError(f"invalid offline phase output: {lines[5:]!r}")
-                    offline_phases = [float(token) for token in tokens[1:11]]
-                    offline_phases += [int(token) for token in tokens[11:]]
-                    if abs(sum(offline_phases[:10]) - values[2]) > 0.1:
+                    count = 9 if mode == 6 else 10
+                    offline_phases = [float(token) for token in tokens[1:count+1]]
+                    if mode == 6: offline_phases += [""]
+                    offline_phases += [int(token) for token in tokens[count+1:]]
+                    if mode != 6 and abs(sum(offline_phases[:10]) - values[2]) > 0.1:
                         raise RuntimeError(f"phase sum differs from offline time: {offline_phases}")
+                parallel = next((line.split(",")[1:] for line in run.stdout.splitlines()
+                                 if line.startswith("PARALLEL,")), ["", "", ""])
                 rows.append((name, n, m, k, width, trial, mode, *values, heap_peak,
-                             *phases, *offline_phases))
+                             *phases, *offline_phases, *parallel, "accumulated_work" if mode == 6 else "serial_phase"))
                 print(name, trial, mode, *(f"{value:.3f}" for value in values[:4]),
                       flush=True)
 
@@ -147,7 +154,8 @@ def main():
     with args.output.open("w", newline="") as output:
         writer = csv.writer(output, lineterminator="\n")
         writer.writerow(FIELDS + (PROFILE_FIELDS if args.profile else ()) +
-                        (OFFLINE_FIELDS if args.offline_profile else ()))
+                        (OFFLINE_FIELDS if args.offline_profile else ()) +
+                        ("requested_threads", "available_cpus", "effective_threads", "profile_semantics"))
         writer.writerows(rows)
 
 

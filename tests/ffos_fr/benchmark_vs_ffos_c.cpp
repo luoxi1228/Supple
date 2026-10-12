@@ -15,7 +15,7 @@ static void ocall_clock(long *t) {
 #include "../../Enclave/SubSample_v2/FFOS_C/helper.cpp"
 #include "../../Enclave/SubSample_v2/FFOS_C/FFOS_C.cpp"
 #include "../../Enclave/SubSample_v2/FFOS_FR/FFOS_FR.cpp"
-#include "../../Enclave/SubSample_v2/FFOS_FR_Opt/FFOS_FR_Opt.cpp"
+#include "../../Enclave/SubSample_v2/FFOS_FR_Par/FFOS_FR_Par.cpp"
 #endif
 #include <string>
 
@@ -40,10 +40,11 @@ constexpr size_t kMethodCount = 2;
 constexpr size_t kMethodCount = 3;
 #endif
 const char *MethodName(size_t method) {
-  static const char *names[] = {"FFOS_C", "FFOS_FR", "FFOS_FR_Opt"};
+  static const char *names[] = {"FFOS_C", "FFOS_FR", "FFOS_FR_Par"};
   return names[method];
 }
 volatile size_t benchmark_sink = 0;
+size_t requested_threads = 0;
 template <class Tape> auto TapeBytes(const Tape &t) -> decltype(t.byte_size()) {
   return t.byte_size();
 }
@@ -77,7 +78,19 @@ Result Measure(size_t method, const std::vector<size_t> &membership,
     memory_profile::Scope scope(&ret);
     if (method != 0) {
       FFOS_FRControls controls;
+#ifndef FFOS_LEGACY_SOURCE
+      std::unique_ptr<supple_parallel::Pool> parallel_pool;
+      size_t threads = 0;
+#endif
       result.control = TimeMs([&] {
+#ifndef FFOS_LEGACY_SOURCE
+        if (method == 2) {
+          threads = ResolveParallelBudget(requested_threads, n, k, &result.phases).threads;
+          parallel_pool.reset(new supple_parallel::Pool(threads));
+          controls = BuildControls(membership, frontier, n, m, k,
+              profile ? &result.phases : nullptr, nullptr, nullptr, threads);
+        } else
+#endif
         controls = FFOS_FRControl(membership, frontier, n, m, k,
                                    profile ? &result.phases : nullptr);
       });
@@ -85,10 +98,14 @@ Result Measure(size_t method, const std::vector<size_t> &membership,
       result.apply = TimeMs([&] {
         const auto output =
 #ifndef FFOS_LEGACY_SOURCE
-          method == 2 ? FFOS_FR_OptApply(data.data(), controls, frontier, n, m, k, width) :
+          method == 2 ? ApplyKnownControls(data.data(), controls, frontier, n, m, k, width,
+              FFOS_FRControlCount(frontier, n, m, k), FFOS_FRBackend::FourGateSSE2, threads) :
 #endif
           FFOS_FRApply(data.data(), controls, frontier, n, m, k, width);
         benchmark_sink ^= output[output.size()/3];
+#ifndef FFOS_LEGACY_SOURCE
+        if (parallel_pool) parallel_pool->Close();
+#endif
       });
     } else {
       std::vector<uint8_t> controls;
@@ -114,12 +131,13 @@ Result Measure(size_t method, const std::vector<size_t> &membership,
 void Print(const char *kind, const char *name, size_t n, size_t m, size_t k,
            size_t width, const char *method, size_t round, bool memory,
            bool profile, const Result &r) {
-  std::printf("%s,%s,%zu,%zu,%zu,%zu,%s,%zu,%d,%d,%.6f,%.6f,%.6f,%zu,%zu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+  std::printf("%s,%s,%zu,%zu,%zu,%zu,%s,%zu,%d,%d,%.6f,%.6f,%.6f,%zu,%zu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%zu,%zu,%zu\n",
       kind,name,n,m,k,width,method,round,int(memory),int(profile),r.control,
       r.apply,r.total,r.tape_bytes,r.heap,
       r.phases.offline_tags_ms,r.phases.offline_normalize_ms,
       r.phases.offline_ofr_write_ms,r.phases.offline_replay_ms,
-      r.phases.offline_project_ms,r.phases.offline_prepare_ms);
+      r.phases.offline_project_ms,r.phases.offline_prepare_ms,
+      r.phases.requested_threads,r.phases.available_cpus,r.phases.effective_threads);
   std::fflush(stdout);
 }
 void Run(const char *name, size_t n, size_t m, size_t k, size_t width,
@@ -173,6 +191,7 @@ int main(int argc,char **argv) {
       if (token=="--matrix") matrix=true;
       else if (token=="--memory") memory=true;
       else if (token=="--profile") profile=true;
+      else if (token=="--threads" && arg+1<argc) { const std::string value(argv[++arg]); requested_threads = value == "auto" ? 0 : std::stoull(value); }
       else if (token=="--warmup" && arg+1<argc) warmup=std::stoull(argv[++arg]);
       else if (token=="--case" && arg+4<argc) {
         n=std::stoull(argv[++arg]);m=std::stoull(argv[++arg]);
@@ -182,7 +201,7 @@ int main(int argc,char **argv) {
     }
     if (rounds==0 || warmup>SIZE_MAX-rounds)
       throw std::invalid_argument("Invalid round count");
-    std::puts("kind,case,n,m,k,width,method,round,memory_tracking,profile,control_ms,apply_ms,total_ms,control_bytes,control_apply_heap_peak_bytes,tags_ms,normalize_ms,write_ms,replay_ms,project_ms,prepare_ms");
+    std::puts("kind,case,n,m,k,width,method,round,memory_tracking,profile,control_ms,apply_ms,total_ms,control_bytes,control_apply_heap_peak_bytes,tags_work_ms,normalize_work_ms,write_work_ms,replay_work_ms,project_work_ms,prepare_work_ms,requested_threads,available_cpus,effective_threads");
     if (n) Run("custom",n,m,k,width,rounds,warmup,memory,profile);
     else if (matrix) {
       for (size_t size : {size_t(1)<<16,size_t(1)<<18,size_t(1)<<20,

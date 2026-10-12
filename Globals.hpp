@@ -69,6 +69,10 @@ Global Flags will sit in CONFIG.h
   };
 
   typedef struct enclave_returns{
+    // Par resource budget: 0 requested threads means automatic.
+    size_t requested_threads, available_cpus, effective_threads;
+    // 0 success, 1 invalid thread budget, 2 insufficient signed TCS, 3 execution failure.
+    int parallel_status;
     size_t OSWAP_count;
     double ptime;
     //double enc_dec_time;
@@ -87,14 +91,15 @@ Global Flags will sit in CONFIG.h
     // For qsort
     double qsort_time;
 
-    // Optional online-phase breakdown for FFOS_C and FFOS_FR. Times are ms.
+    // Optional phase work in ms. Par sums thread-local work across workers;
+    // gen_perm_time/apply_perm_time remain wall-clock durations.
     int collect_online_profile;
     double online_route_ms;
     double online_reorder_ms;
     double online_copy_ms;
     double online_shuffle_ms;
 
-    // Optional offline breakdown (ms) and SGX heap high-water marks (bytes).
+    // Optional offline work (ms) and SGX heap high-water marks (bytes).
     int collect_offline_profile;
     double offline_mark_ms;
     double offline_count_ms;

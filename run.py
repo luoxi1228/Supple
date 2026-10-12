@@ -7,14 +7,15 @@ from typing import Any, Dict, List
 
 # Base template. Edit these defaults as needed.
 BASE_CONFIG: Dict[str, Any] = {
-    "modes": [1,2,3,4,5],
-    "p": [0.0078125],
+    "modes": [1,2,3,4,5,6],
+    "p": [0.015625],
     "n": [1048576],
-    "k": [896],
+    "k": [64],
     "k_select": 1,
-    "block_sizes": [4, 8, 16, 24, 48, 72, 128, 168, 256, 344, 512, 680, 768, 1032, 1280, 1544, 2048, 2568, 3072, 3592, 3840, 4096],
-    "repeat": 1,
+    "block_sizes": [16],
+    "repeat": 3,
     "warmup": 1,
+    "threads": [4],  # mode 6 only: ["auto"], [4], or multiple budgets [1, 2, 4]
     "results_folder": "RESULTS",
     "overwrite": False,
     "offline_profile": False,
@@ -23,24 +24,24 @@ BASE_CONFIG: Dict[str, Any] = {
 # Add as many groups as you want.
 # Each group overrides BASE_CONFIG fields.
 EXPERIMENT_GROUPS: List[Dict[str, Any]] = [
-    # {
-    #     "name": "group_n",
-    #     "modes": [1,2,3,4,5],
-    #     "p": [0.015625],
-    #     "n": [2097152, 8388608, 33554432, 134217728], # 1M to 256M
-    #     "k": [1],
-    #     "k_select": 1,
-    #     "block_sizes": [16],
-    #     "repeat": 3,
-    #     "warmup": 1,
-    #     "results_folder": "RESULTS",
-    #     "overwrite": False,
-    #     "offline_profile": False,
-    # },
+    {
+        "name": "group_n",
+        "modes": [6],
+        "p": [0.015625],
+        "n": [1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456], # 1M to 256M
+        "k": [1],
+        "k_select": 1,
+        "block_sizes": [16],
+        "repeat": 3,
+        "warmup": 1,
+        "results_folder": "RESULTS",
+        "overwrite": False,
+        "offline_profile": False,
+    },
     {
         "name": "group_p",
-        "modes": [1,3,4,5],
-        "p": [0.125, 0.03125, 0.0078125, 0.001953125], # 1/4 to 1/1024
+        "modes": [6],
+        "p": [0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625], # 1/4 to 1/1024
         "n": [1048576],
         "k": [64],
         "k_select": 2,
@@ -53,10 +54,10 @@ EXPERIMENT_GROUPS: List[Dict[str, Any]] = [
     },
     {
         "name": "group_k",
-        "modes": [1,3,4,5],
+        "modes": [6],
         "p": [0.015625],
         "n": [1048576],
-        "k": [32,128,512,2048],   # 16 to 4096
+        "k": [16,32,64,128,256,512,1024,2048,4096],   # 16 to 4096
         "k_select": 2,
         "block_sizes": [16],
         "repeat": 3,
@@ -67,12 +68,12 @@ EXPERIMENT_GROUPS: List[Dict[str, Any]] = [
     },
     {
         "name": "group_b",
-        "modes": [1,2,3,4,5],
+        "modes": [6],
         "p": [0.015625],
         "n": [1048576],
         "k": [1],
         "k_select": 1,
-        "block_sizes": [32,128,512,2048], # 16 to 4096
+        "block_sizes": [16,32,64,128,256,512,1024,2048,4096], # 16 to 4096
         "repeat": 3,
         "warmup": 1,
         "results_folder": "RESULTS",
@@ -118,6 +119,9 @@ def build_cmd(run_experiments_py: Path, cfg: Dict[str, Any], force_overwrite: bo
         "--offline-profile" if cfg["offline_profile"] else "--no-offline-profile",
     ]
 
+    if 6 in cfg["modes"]:
+        cmd.extend(["--threads", list_to_csv(cfg["threads"])])
+
     if force_overwrite or bool(cfg.get("overwrite", False)):
         cmd.append("--overwrite")
 
@@ -128,6 +132,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run multiple run_experiments.py configuration groups in one shot")
     parser.add_argument("--dry-run", action="store_true", help="Print commands only, do not execute")
     parser.add_argument("--stop-on-error", action="store_true", help="Stop immediately if any group fails")
+    parser.add_argument("--threads", help="Override mode 6 thread budgets for all groups: auto or comma-separated positive integers")
     parser.add_argument(
         "--overwrite-first",
         action="store_true",
@@ -153,6 +158,8 @@ def main() -> int:
 
     for idx, group in enumerate(EXPERIMENT_GROUPS, start=1):
         cfg = merged_config(group)
+        if args.threads is not None:
+            cfg["threads"] = args.threads.split(",")
         name = str(cfg.get("name", f"group_{idx:02d}"))
         force_overwrite = bool(args.overwrite_first and idx == 1)
         cmd = build_cmd(run_experiments_py, cfg, force_overwrite)

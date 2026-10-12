@@ -15,6 +15,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <memory>
+#include "../../ThreadPool.hpp"
+#ifndef BEFTS_MODE
+#include "../../../.build/EnclaveCapacity.hpp"
+#endif
 #include <stdexcept>
 #include <utility>
 
@@ -273,12 +278,15 @@ void RecordPreparedNode(FFOS_FRControls &controls, size_t offset,
   controls.nodes.push_back({offset, shape_index, postordered, count});
 }
 
+#include "ParallelPlan.tcc"
+
 FFOS_FRControlPositions WriteNode(
     const size_t *membership, size_t *owned_membership, size_t words,
     FFOS_FRControls &controls,
     const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
     FFOS_FRControlPositions position, enc_ret *profile, bool prepared,
-    ControlWriteContext &context, size_t depth)
+    ControlWriteContext &context, size_t depth,
+    ParallelWriteState *parallel = nullptr, size_t plan_id = 0, size_t budget = 1)
 {
   double *tags_ms = profile ? &profile->offline_tags_ms : nullptr;
   double *normalize_ms = profile ? &profile->offline_normalize_ms : nullptr;
@@ -340,19 +348,21 @@ FFOS_FRControlPositions WriteNode(
           if (postordered)
             position.ofr_words = ofr::detail::OFRControlWritePostOrderAndRouteNormalized(
                 tags, controls.ofr, routed, words,
-                n, left_n, right_n, start, control_count);
+                n, left_n, right_n, start, control_count,
+                parallel ? &parallel->plan.nodes[plan_id].ofr_boundary : nullptr);
           else
           {
             workspace.features.reserve(n / 2);
             position.ofr_words = ofr::detail::OFRControlWriteAndRouteNormalized(
                 tags, controls.ofr, routed, words,
-                n, left_n, right_n, start, control_count, &workspace.features);
+                n, left_n, right_n, start, control_count, &workspace.features,
+                parallel ? &parallel->plan.nodes[plan_id].ofr_boundary : nullptr);
           }
         });
       }
       if (position.ofr_words - start != control_count)
         throw std::logic_error("FFOS_FR OFR replay offset mismatch");
-      if (prepared)
+      if (prepared && !parallel)
         online_profile::Track(profile ? &profile->offline_prepare_ms : nullptr,
                               [&] {
           RecordPreparedNode(controls, start, position.ofr_words - start,
@@ -395,6 +405,20 @@ FFOS_FRControlPositions WriteNode(
         }
       });
     }
+    if (parallel) {
+      const auto &ids = parallel->plan.nodes[plan_id].children;
+      RunPlanGroups(parallel->plan, ids, 0, ids.size(), budget, n,
+        [&](size_t index, size_t child_budget) {
+          const size_t child_id = ids[index];
+          const auto &child_plan = parallel->plan.nodes[child_id];
+          size_t *marks = index == 0 ? left.mark_ptr() : right.mark_ptr();
+          WriteNode(marks, marks, MarkWords(child_plan.k), controls, {},
+              child_plan.n, m, child_plan.k, child_plan.begin,
+              parallel->Profile(), prepared, parallel->Context(k), depth + 1,
+              parallel, child_id, child_budget);
+        });
+      return parallel->plan.nodes[plan_id].end;
+    }
     position = WriteNode(left.mark_ptr(), left.mark_ptr(), MarkWords(left_k),
                          controls, {}, left_n, m, left_k, position, profile,
                          prepared, context, depth + 1);
@@ -406,6 +430,45 @@ FFOS_FRControlPositions WriteNode(
   const std::vector<FrontierNode> nodes =
       k == 1 ? std::vector<FrontierNode>{{0, 1}}
              : ChildrenOrFrontier(frontier, k);
+  if (parallel) {
+    const auto &ids = parallel->plan.nodes[plan_id].children;
+    RunPlanGroups(parallel->plan, ids, 0, ids.size(), budget, n,
+      [&](size_t index, size_t child_budget) {
+        const FrontierNode &node = nodes[index];
+        const size_t child_id = ids[index];
+        auto &child_plan = parallel->plan.nodes[child_id];
+        ControlWriteContext &branch_context = parallel->Context(k);
+        auto &branch_workspace = branch_context.workspaces[depth];
+        enc_ret *branch_profile = parallel->Profile();
+        FFOS_FRControlPositions branch_position = child_plan.begin;
+        branch_position.swo_bits = child_plan.filter_position;
+        const size_t child_n = FfosCNodeCapacity(n, m, node.count);
+        ffos_c_detail::FfosCMarkWorkspace &child = branch_workspace.child;
+        if (child_n < n)
+          online_profile::Track(branch_profile ? &branch_profile->offline_swo_write_ms : nullptr, [&] {
+            ffos_c_detail::FfosCCheckControlSpan(controls.swo, branch_position.swo_bits, n);
+            bool *selected = branch_context.selected_scratch.acquire(n);
+            if (selected == nullptr)
+              throw std::bad_alloc();
+            ReserveMarks(child, n, MarkWords(node.count));
+            ffos_c_detail::CompactMarkToWorkspaceAndControl(
+                membership, n, words, selected, child_n, node.start, node.count,
+                controls.swo, branch_position.swo_bits, child, &child_plan.swo_boundary);
+            branch_position.swo_bits += n;
+          });
+        else
+          online_profile::Track(branch_profile ? &branch_profile->offline_project_ms : nullptr, [&] {
+            ReserveMarks(child, n, MarkWords(node.count));
+            ffos_c_detail::ProjectMarkToWorkspace(
+                membership, n, words, node.start, node.count, child);
+          });
+        if (node.count > 1)
+          WriteNode(child.mark_ptr(), child.mark_ptr(), MarkWords(node.count),
+              controls, {}, child_n, m, node.count, child_plan.begin, branch_profile,
+              prepared, branch_context, depth + 1, parallel, child_id, child_budget);
+      });
+    return parallel->plan.nodes[plan_id].end;
+  }
   for (const FrontierNode &node : nodes)
   {
     const size_t child_n = FfosCNodeCapacity(n, m, node.count);
@@ -660,11 +723,13 @@ FFOS_FRReadResult ReadNode(
   return {written, position};
 }
 
+#include "ParallelRead.tcc"
+
 FFOS_FRControls BuildControls(
     const std::vector<size_t> &membership,
     const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
     enc_ret *profile, FFOS_FRControlCounts *counts_out,
-    size_t *owned_root = nullptr)
+    size_t *owned_root = nullptr, size_t parallel_threads = 0)
 {
   CheckDimensions(n, m, k);
   CheckFrontier(frontier, n, m, k);
@@ -677,6 +742,27 @@ FFOS_FRControls BuildControls(
   FFOS_FRControls controls;
   controls.swo.resize(counts.swo_bits / 8 + (counts.swo_bits % 8 != 0), 0);
   controls.ofr.resize(counts.ofr_words, 0);
+  if (parallel_threads) {
+    ParallelWriteState parallel(parallel_threads, profile != nullptr, k);
+    FFOS_FRControlPositions end{0, 0};
+    online_profile::Track(profile ? &profile->offline_prepare_ms : nullptr, [&] {
+      parallel.plan.Add(frontier, n, m, k, 0, end, &controls);
+    });
+    WriteNode(membership.data(), owned_root, MarkWords(k), controls, frontier,
+        n, m, k, {0, 0}, parallel.Profile(), true, parallel.Context(k), 0,
+        &parallel, 0, parallel_threads);
+    // No reader (including an adjacent writer) sees these partial bytes until
+    // the entire recursive fork has joined successfully.
+    for (const auto &node : parallel.plan.nodes) {
+      controls.ofr.commit(node.ofr_boundary);
+      node.swo_boundary.Commit(controls.swo.data());
+    }
+    MergeOfflineProfile(profile, parallel.profiles);
+    if (end.swo_bits != counts.swo_bits || end.ofr_words != counts.ofr_words)
+      throw std::logic_error("FFOS_FR parallel plan/count mismatch");
+    if (counts_out) *counts_out = counts;
+    return controls;
+  }
   const FFOS_FRControlPositions end = WriteNode(
       membership.data(), owned_root, MarkWords(k), controls, frontier, n, m, k,
       {0, 0}, profile, true, context, 0);
@@ -690,7 +776,8 @@ FFOS_FRControls BuildControls(
 std::vector<unsigned char> ApplyKnownControls(
     const unsigned char *data, const FFOS_FRControls &controls,
     const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
-    size_t block_size, const FFOS_FRControlCounts &counts, FFOS_FRBackend backend)
+    size_t block_size, const FFOS_FRControlCounts &counts, FFOS_FRBackend backend,
+    size_t parallel_threads = 0)
 {
   if (controls.swo.size() !=
           counts.swo_bits / 8 + (counts.swo_bits % 8 != 0) ||
@@ -701,9 +788,11 @@ std::vector<unsigned char> ApplyKnownControls(
       MulOverflowSizeT(blocks, block_size, &bytes))
     throw std::length_error("FFOS_FR output size overflow");
   std::vector<unsigned char> result(bytes);
-  const FFOS_FRReadResult read = FFOS_FRControlRead(
-      data, controls, frontier, n, m, k, block_size, result.data(), blocks,
-      {0, 0}, nullptr, backend);
+  const FFOS_FRReadResult read = parallel_threads
+      ? ReadParallel(data, controls, frontier, n, m, k, block_size,
+                     result.data(), blocks, nullptr, parallel_threads)
+      : FFOS_FRControlRead(data, controls, frontier, n, m, k, block_size,
+                          result.data(), blocks, {0, 0}, nullptr, backend);
   if (read.written_blocks != blocks ||
       read.next.swo_bits != counts.swo_bits ||
       read.next.ofr_words != counts.ofr_words)
@@ -819,7 +908,8 @@ std::vector<unsigned char> FFOS_FR(
 
 void ffos_fr_detail::DecWithBackend(unsigned char *encrypted_buffer,
     size_t N, size_t M, size_t K, size_t encrypted_block_size,
-    unsigned char *encrypt_result_buffer, enc_ret *ret, FFOS_FRBackend backend)
+    unsigned char *encrypt_result_buffer, enc_ret *ret, FFOS_FRBackend backend,
+    size_t nthreads, bool parallel)
 {
   if (ret == nullptr) return;
   memory_profile::Scope memory(ret);
@@ -853,6 +943,12 @@ void ffos_fr_detail::DecWithBackend(unsigned char *encrypted_buffer,
   {
     long start = 0, end = 0;
     ocall_clock(&start);
+    std::unique_ptr<supple_parallel::Pool> pool;
+    size_t threads = 0;
+    if (parallel) {
+      threads = ResolveParallelBudget(nthreads, N, K, ret).threads;
+      pool.reset(new supple_parallel::Pool(threads));
+    }
     std::vector<size_t> membership;
     online_profile::Track(ret->collect_offline_profile
                               ? &ret->offline_mark_ms : nullptr, [&] {
@@ -869,7 +965,7 @@ void ffos_fr_detail::DecWithBackend(unsigned char *encrypted_buffer,
     const FFOS_FRControls controls = BuildControls(
         membership, frontier, N, M, K,
         ret->collect_offline_profile ? ret : nullptr, &counts,
-        membership.data());
+        membership.data(), threads);
     // Include workspace destruction and releasing the root in real offline
     // time; online no longer retains membership that it never reads.
     std::vector<size_t>().swap(membership);
@@ -882,10 +978,12 @@ void ffos_fr_detail::DecWithBackend(unsigned char *encrypted_buffer,
 #endif
     std::vector<unsigned char> plain(bytes);
     ocall_clock(&start);
-    const FFOS_FRReadResult read = FFOS_FRControlRead(
-        decrypted, controls, frontier, N, M, K, width,
-        plain.data(), blocks, {0, 0},
-        ret->collect_online_profile ? ret : nullptr, backend);
+    const FFOS_FRReadResult read = parallel
+        ? ReadParallel(decrypted, controls, frontier, N, M, K, width,
+            plain.data(), blocks, ret->collect_online_profile ? ret : nullptr, threads)
+        : FFOS_FRControlRead(decrypted, controls, frontier, N, M, K, width,
+            plain.data(), blocks, {0, 0}, ret->collect_online_profile ? ret : nullptr, backend);
+    if (pool) pool->Close();
     ocall_clock(&end);
     if (read.written_blocks != blocks ||
         read.next.swo_bits != counts.swo_bits ||
@@ -905,6 +1003,7 @@ void ffos_fr_detail::DecWithBackend(unsigned char *encrypted_buffer,
   }
   catch (const std::exception &)
   {
+    if (parallel && ret->parallel_status == 0) ret->parallel_status = 3;
     ret->ptime = ret->gen_perm_time = ret->apply_perm_time = 0.0;
     ret->online_route_ms = ret->online_reorder_ms = 0.0;
     ret->online_copy_ms = ret->online_shuffle_ms = 0.0;
@@ -920,4 +1019,41 @@ extern "C" void DecFFOS_FR(unsigned char *encrypted_buffer,
 {
   ffos_fr_detail::DecWithBackend(encrypted_buffer, N, M, K,
       encrypted_block_size, encrypt_result_buffer, ret, FFOS_FRBackend::Scalar);
+}
+
+FFOS_FRControls ffos_fr_detail::ParallelControl(
+    const std::vector<size_t> &membership, const std::vector<FrontierNode> &frontier,
+    size_t n, size_t m, size_t k, enc_ret *profile, size_t requested) {
+  const auto budget = ResolveParallelBudget(requested, n, k, profile);
+  supple_parallel::Pool pool(budget.threads);
+  return BuildControls(membership, frontier, n, m, k, profile, nullptr,
+                       nullptr, budget.threads);
+}
+std::vector<unsigned char> ffos_fr_detail::ParallelApply(
+    const unsigned char *data, const FFOS_FRControls &controls,
+    const std::vector<FrontierNode> &frontier, size_t n, size_t m, size_t k,
+    size_t width, size_t requested) {
+  const auto budget = ResolveParallelBudget(requested, n, k);
+  const auto counts = FFOS_FRControlCount(frontier, n, m, k);
+  supple_parallel::Pool pool(budget.threads);
+  return ApplyKnownControls(data, controls, frontier, n, m, k, width, counts,
+                           FFOS_FRBackend::FourGateSSE2, budget.threads);
+}
+std::vector<unsigned char> ffos_fr_detail::ParallelSample(
+    const unsigned char *data, size_t n, size_t m, size_t k, size_t width,
+    size_t requested) {
+  if (!data || !n || !m || !k || !width) return {};
+  m = std::min(m, n);
+  const auto budget = ResolveParallelBudget(requested, n, k);
+  supple_parallel::Pool pool(budget.threads);
+  size_t capacity = 0;
+  const auto frontier = MulOverflowSizeT(m, k, &capacity) || capacity > n
+      ? FFOS_CFrontier(n, m, k) : std::vector<FrontierNode>{};
+  auto membership = FFOS_CMark(n, m, k);
+  FFOS_FRControlCounts counts;
+  const auto controls = BuildControls(membership, frontier, n, m, k,
+      nullptr, &counts, membership.data(), budget.threads);
+  std::vector<size_t>().swap(membership);
+  return ApplyKnownControls(data, controls, frontier, n, m, k, width, counts,
+                           FFOS_FRBackend::FourGateSSE2, budget.threads);
 }

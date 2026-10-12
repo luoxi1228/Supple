@@ -1,0 +1,35 @@
+{
+  "build": "/tmp/supple-par-scaling.i30aqezd",
+  "source_sha256": "9eb015f485489524b729d2a7423499fad41ce159acf2a82d25e9c936feeb2a28",
+  "backend": "native",
+  "available_cpus": 8,
+  "budgets": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "case": [
+    65536,
+    1024,
+    64,
+    16
+  ],
+  "heap_bytes": 28971008,
+  "stack_reservation_bytes": 33554432,
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "rounds": 7,
+  "warmup": 2,
+  "host": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
+  "cpu_model": "Intel(R) Xeon(R) Platinum 8369B CPU @ 2.70GHz",
+  "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+}

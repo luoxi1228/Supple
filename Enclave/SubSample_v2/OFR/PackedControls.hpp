@@ -7,6 +7,7 @@
 #include <limits>
 #include <stdexcept>
 #include <vector>
+#include "../PackedBoundary.hpp"
 
 namespace ofr
 {
@@ -53,7 +54,11 @@ class PackedControlMutableView
 {
 public:
   size_t size() const { return count_; }
-  uint8_t get(size_t index) const { return view().get(index); }
+  uint8_t get(size_t index) const {
+    if (index >= count_) throw std::out_of_range("Packed OFR control index");
+    const size_t gate = offset_ + index;
+    return static_cast<uint8_t>((byte(gate / 4) >> (2 * (gate % 4))) & 3U);
+  }
   uint8_t operator[](size_t index) const { return get(index); }
   void set(size_t index, uint8_t value)
   {
@@ -64,8 +69,8 @@ public:
     const size_t gate = offset_ + index;
     const size_t shift = 2 * (gate % 4);
     const uint8_t mask = static_cast<uint8_t>(3U << shift);
-    bytes_[gate / 4] = static_cast<uint8_t>(
-        (bytes_[gate / 4] & static_cast<uint8_t>(~mask)) | (value << shift));
+    byte(gate / 4) = static_cast<uint8_t>(
+        (byte(gate / 4) & static_cast<uint8_t>(~mask)) | (value << shift));
   }
   // Four already-encoded two-bit gates. Public alignment determines whether
   // one or two storage bytes are touched; neighboring node bits are retained.
@@ -74,19 +79,19 @@ public:
     if (index > count_ || count_ - index < 4)
       throw std::out_of_range("Packed OFR four-control span");
     const size_t gate = offset_ + index;
-    const size_t byte = gate / 4;
+    const size_t byte_index = gate / 4;
     const size_t shift = 2 * (gate % 4);
     if (shift == 0)
-      bytes_[byte] = controls;
+      byte(byte_index) = controls;
     else
     {
       const uint16_t original = static_cast<uint16_t>(
-          bytes_[byte] | (uint16_t(bytes_[byte + 1]) << 8U));
+          byte(byte_index) | (uint16_t(byte(byte_index + 1)) << 8U));
       const uint16_t mask = static_cast<uint16_t>(uint16_t(255) << shift);
       const uint16_t updated = static_cast<uint16_t>(
           (original & static_cast<uint16_t>(~mask)) | (uint16_t(controls) << shift));
-      bytes_[byte] = static_cast<uint8_t>(updated);
-      bytes_[byte + 1] = static_cast<uint8_t>(updated >> 8U);
+      byte(byte_index) = static_cast<uint8_t>(updated);
+      byte(byte_index + 1) = static_cast<uint8_t>(updated >> 8U);
     }
   }
   void set_two_encoded(size_t index, uint8_t controls)
@@ -96,20 +101,20 @@ public:
     if (controls > 15U)
       throw std::invalid_argument("Invalid packed OFR pair");
     const size_t gate = offset_ + index;
-    const size_t byte = gate / 4;
+    const size_t byte_index = gate / 4;
     const size_t shift = 2 * (gate % 4);
     if (shift <= 4)
-      bytes_[byte] = static_cast<uint8_t>(
-          (bytes_[byte] & static_cast<uint8_t>(~(15U << shift))) | (controls << shift));
+      byte(byte_index) = static_cast<uint8_t>(
+          (byte(byte_index) & static_cast<uint8_t>(~(15U << shift))) | (controls << shift));
     else
     {
       const uint16_t original = static_cast<uint16_t>(
-          bytes_[byte] | (uint16_t(bytes_[byte + 1]) << 8U));
+          byte(byte_index) | (uint16_t(byte(byte_index + 1)) << 8U));
       const uint16_t updated = static_cast<uint16_t>(
           (original & static_cast<uint16_t>(~(uint16_t(15) << shift))) |
           (uint16_t(controls) << shift));
-      bytes_[byte] = static_cast<uint8_t>(updated);
-      bytes_[byte + 1] = static_cast<uint8_t>(updated >> 8U);
+      byte(byte_index) = static_cast<uint8_t>(updated);
+      byte(byte_index + 1) = static_cast<uint8_t>(updated >> 8U);
     }
   }
   void set_eight_encoded(size_t index, uint16_t controls)
@@ -117,22 +122,22 @@ public:
     if (index > count_ || count_ - index < 8)
       throw std::out_of_range("Packed OFR eight-control span");
     const size_t gate = offset_ + index;
-    const size_t byte = gate / 4;
+    const size_t byte_index = gate / 4;
     const size_t shift = 2 * (gate % 4);
     if (shift == 0)
     {
-      bytes_[byte] = static_cast<uint8_t>(controls);
-      bytes_[byte + 1] = static_cast<uint8_t>(controls >> 8U);
+      byte(byte_index) = static_cast<uint8_t>(controls);
+      byte(byte_index + 1) = static_cast<uint8_t>(controls >> 8U);
     }
     else
     {
-      const uint32_t original = bytes_[byte] | (uint32_t(bytes_[byte + 1]) << 8U) |
-                                (uint32_t(bytes_[byte + 2]) << 16U);
+      const uint32_t original = byte(byte_index) | (uint32_t(byte(byte_index + 1)) << 8U) |
+                                (uint32_t(byte(byte_index + 2)) << 16U);
       const uint32_t mask = uint32_t(65535) << shift;
       const uint32_t updated = (original & ~mask) | (uint32_t(controls) << shift);
-      bytes_[byte] = static_cast<uint8_t>(updated);
-      bytes_[byte + 1] = static_cast<uint8_t>(updated >> 8U);
-      bytes_[byte + 2] = static_cast<uint8_t>(updated >> 16U);
+      byte(byte_index) = static_cast<uint8_t>(updated);
+      byte(byte_index + 1) = static_cast<uint8_t>(updated >> 8U);
+      byte(byte_index + 2) = static_cast<uint8_t>(updated >> 16U);
     }
   }
   void set_sixteen_encoded(size_t index, uint32_t controls)
@@ -140,20 +145,20 @@ public:
     if (index > count_ || count_ - index < 16)
       throw std::out_of_range("Packed OFR sixteen-control span");
     const size_t gate = offset_ + index;
-    const size_t byte = gate / 4;
+    const size_t byte_index = gate / 4;
     const size_t shift = 2 * (gate % 4);
     if (shift == 0)
       for (size_t part = 0; part < 4; ++part)
-        bytes_[byte + part] = static_cast<uint8_t>(controls >> (8 * part));
+        byte(byte_index + part) = static_cast<uint8_t>(controls >> (8 * part));
     else
     {
       uint64_t original = 0;
       for (size_t part = 0; part < 5; ++part)
-        original |= uint64_t(bytes_[byte + part]) << (8 * part);
+        original |= uint64_t(byte(byte_index + part)) << (8 * part);
       const uint64_t mask = uint64_t(0xffffffffU) << shift;
       const uint64_t updated = (original & ~mask) | (uint64_t(controls) << shift);
       for (size_t part = 0; part < 5; ++part)
-        bytes_[byte + part] = static_cast<uint8_t>(updated >> (8 * part));
+        byte(byte_index + part) = static_cast<uint8_t>(updated >> (8 * part));
     }
   }
   PackedControlView view() const { return PackedControlView(bytes_, offset_, count_); }
@@ -162,12 +167,32 @@ public:
   {
     if (offset > count_ || count > count_ - offset)
       throw std::out_of_range("Packed OFR control span");
-    return PackedControlMutableView(bytes_, offset_ + offset, count);
+    return PackedControlMutableView(bytes_, offset_ + offset, count, boundary_);
   }
 
 private:
-  PackedControlMutableView(uint8_t *bytes, size_t offset, size_t count)
-      : bytes_(bytes), offset_(offset), count_(count) {}
+  class ByteReference {
+   public:
+    ByteReference(PackedControlMutableView *owner, size_t index) : owner_(owner), index_(index) {}
+    operator uint8_t() const { return owner_->read(index_); }
+    ByteReference &operator=(uint8_t value) {
+      if (owner_->boundary_) owner_->boundary_->Write(owner_->bytes_, index_, value);
+      else owner_->bytes_[index_] = value;
+      return *this;
+    }
+   private:
+    PackedControlMutableView *owner_;
+    size_t index_;
+  };
+  uint8_t read(size_t index) const {
+    return boundary_ ? boundary_->Read(bytes_, index) : bytes_[index];
+  }
+  uint8_t byte(size_t index) const { return read(index); }
+  ByteReference byte(size_t index) { return ByteReference(this, index); }
+  PackedControlMutableView(uint8_t *bytes, size_t offset, size_t count,
+                           supple_parallel::PackedBoundary *boundary = NULL)
+      : boundary_(boundary), bytes_(bytes), offset_(offset), count_(count) {}
+  supple_parallel::PackedBoundary *boundary_;
   uint8_t *bytes_;
   size_t offset_;
   size_t count_;
@@ -302,12 +327,14 @@ public:
     if (offset > count_) throw std::out_of_range("Packed OFR control span");
     return mutable_view(offset, count_ - offset);
   }
-  PackedControlMutableView mutable_view(size_t offset, size_t count)
+  PackedControlMutableView mutable_view(size_t offset, size_t count,
+      supple_parallel::PackedBoundary *boundary = NULL)
   {
     if (offset > count_) throw std::out_of_range("Packed OFR control span");
     if (count > count_ - offset) throw std::out_of_range("Packed OFR control span");
-    return PackedControlMutableView(bytes_.data(), offset, count);
+    return PackedControlMutableView(bytes_.data(), offset, count, boundary);
   }
+  void commit(const supple_parallel::PackedBoundary &boundary) { boundary.Commit(bytes_.data()); }
   void copy_from(size_t offset, PackedControlView source)
   {
     PackedControlMutableView destination = mutable_view(offset, source.size());

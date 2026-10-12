@@ -1,3 +1,4 @@
+#include "CpuBudget.hpp"
 
 
 #include "Untrusted.h"
@@ -48,6 +49,8 @@ unsigned long ocall_print_string_with_rtclock_diff(const char *str, unsigned lon
 
     return now;
 }
+
+size_t ocall_ffos_fr_cpu_budget() { return supple_cpu::Available(); }
 
 long ocall_clock() {
     struct timespec tp;
@@ -496,9 +499,9 @@ void DecFFOS_FR(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, s
   DecFFOS_FR(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret);
 }
 
-void DecFFOS_FR_Opt(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size,
-  unsigned char *encrypt_result_buffer, enc_ret *ret) {
-  DecFFOS_FR_Opt(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, ret);
+void DecFFOS_FR_Par(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size,
+  unsigned char *encrypt_result_buffer, size_t nthreads, enc_ret *ret) {
+  DecFFOS_FR_Par(global_eid, encrypted_buffer, N, M, K, encrypted_block_size, encrypt_result_buffer, nthreads, ret);
 }
 
 void RecursiveShuffle_M1(unsigned char *buf, uint64_t N, size_t block_size) {

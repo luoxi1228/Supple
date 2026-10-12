@@ -4,7 +4,7 @@
 #include "../../Enclave/SubSample_v2/FFOS_C/helper.cpp"
 #include "../../Enclave/SubSample_v2/FFOS_C/FFOS_C.cpp"
 #include "../../Enclave/SubSample_v2/FFOS_FR/FFOS_FR.cpp"
-#include "../../Enclave/SubSample_v2/FFOS_FR_Opt/FFOS_FR_Opt.cpp"
+#include "../../Enclave/SubSample_v2/FFOS_FR_Par/FFOS_FR_Par.cpp"
 
 thread_local uint64_t OSWAP_COUNTER = 0;
 namespace ofr {
@@ -66,7 +66,7 @@ int main() {
     const auto scalar = FFOS_FRApply(data.data(), controls, {}, n, m, k, width);
     CheckGates(gates, false, n, width);
     ResetGates();
-    const auto optimized = FFOS_FR_OptApply(data.data(), controls, {}, n, m, k, width);
+    const auto optimized = FFOS_FR_ParApply(data.data(), controls, {}, n, m, k, width);
     CheckGates(gates, true, n, width);
     assert(scalar == optimized);
     assert(data == input_before);
@@ -80,10 +80,10 @@ int main() {
     assert(ofr::test_scalar_gate_calls == gates);
     assert(ret.OSWAP_count == gates);
     ResetGates();
-    DecFFOS_FR_Opt(data.data(), n, m, k, width, encrypted.data(), &ret);
+    DecFFOS_FR_Par(data.data(), n, m, k, width, encrypted.data(), 1, &ret);
     assert(ofr::test_scalar_gate_calls + 4 * ofr::test_four_gate_batches == gates);
     assert((ofr::test_four_gate_batches != 0) == (width == 8 || width == 16));
     assert(ret.OSWAP_count == gates);
   }
-  std::printf("PASS: %zu real OFork/SSE2 equivalence cases; scalar and Opt API/ECALL dispatch and gate counts\n", checked);
+  std::printf("PASS: %zu real OFork/SSE2 equivalence cases; scalar and Par API/ECALL dispatch and gate counts\n", checked);
 }

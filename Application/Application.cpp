@@ -33,6 +33,7 @@ size_t BLOCK_SIZE;
 size_t REPEAT;
 size_t WARMUP = 1;
 size_t TOTAL_ROUNDS;
+size_t PAR_THREADS = 0, PAR_AVAILABLE = 0, PAR_EFFECTIVE = 0;
 
 uint64_t NUM_ZERO_BYTES;
 unsigned char *zeroes = nullptr;
@@ -58,7 +59,7 @@ void parseCommandLineArguments(int argc, char *argv[]) {
           "  (3) CompactionBasedSWO (mark, compact and truncate K times)\n"
           "  (4) FFOS_C\n"
           "  (5) FFOS-FR (per-gate OFork)\n"
-          "  (6) FFOS-FR-Opt (four-gate SSE2 for 8/16-byte records)\n"
+          "  (6) FFOS-FR-Par (four-gate SSE2 for 8/16-byte records)\n"
           "  (10) PSQF_single (shuffle all then take first N*P)\n"
           "  (11) SubSample (randomly select N*P items, then compact)\n"
           "  (12) SubSampleMulti\n"
@@ -66,6 +67,18 @@ void parseCommandLineArguments(int argc, char *argv[]) {
     exit(argc > 1 ? 1 : 0);
   }
 
+  const char *threads = getenv("FFOS_FR_THREADS");
+  if (threads && strcmp(threads, "auto") != 0) {
+    char *end = nullptr;
+    errno = 0;
+    const unsigned long long value = strtoull(threads, &end, 10);
+    if (!*threads || *threads == '-' || *threads == '+' || errno == ERANGE ||
+        end == threads || *end || value == 0 || value > SIZE_MAX) {
+      fprintf(stderr, "FFOS_FR_THREADS must be auto or a positive integer\n");
+      exit(1);
+    }
+    PAR_THREADS = static_cast<size_t>(value);
+  }
   MODE = atoi(argv[1]);
   if (!((MODE >= 1 && MODE <= 6) || (MODE >= 10 && MODE <= 13))) {
     printf("MODE must be one of 1,2,3,4,5,6,10,11,12,13.\n");
@@ -379,7 +392,18 @@ int main(int argc, char *argv[]) {
         if (MODE == 5)
           DecFFOS_FR(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
         else
-          DecFFOS_FR_Opt(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, &ret);
+          DecFFOS_FR_Par(buf, N, SampleSize, K, ENC_BLOCK_SIZE, buf, PAR_THREADS, &ret);
+        if (MODE == 6) {
+          if (ret.parallel_status) {
+            const char *error = ret.parallel_status == 1 ? "thread budget exceeds available CPUs" :
+                ret.parallel_status == 2 ? "TCS capacity insufficient; reconfigure, rebuild and sign on this machine" :
+                "parallel execution failed (worker creation or algorithm error)";
+            fprintf(stderr, "FFOS_FR_Par: %s\n", error);
+            return 1;
+          }
+          PAR_AVAILABLE = ret.available_cpus;
+          PAR_EFFECTIVE = ret.effective_threads;
+        }
         ptime_array[r] = ret.ptime;
         gen_perm_time_array[r] = ret.gen_perm_time;
         apply_perm_time_array[r] = ret.apply_perm_time;
@@ -537,6 +561,8 @@ int main(int argc, char *argv[]) {
   }
   // Some legacy modes report a cumulative swap counter, so keep round zero.
   printf("%ld\n", num_oswaps[0]);
+  if (MODE == 6)
+    printf("PARALLEL,%zu,%zu,%zu\n", PAR_THREADS, PAR_AVAILABLE, PAR_EFFECTIVE);
   if (profile_memory)
     printf("MEMORY,%zu\n", algorithm_heap_peak_bytes);
   if (profile_online && (MODE == 4 || MODE == 5 || MODE == 6)) {
@@ -545,7 +571,8 @@ int main(int argc, char *argv[]) {
     const double copy = calculateAve(online_copy_array + WARMUP, REPEAT);
     const double shuffle = calculateAve(online_shuffle_array + WARMUP, REPEAT);
     const double online = calculateAve(apply_perm_time_array + WARMUP, REPEAT);
-    printf("PROFILE,%f,%f,%f,%f,%f\n", route, reorder, copy, shuffle,
+    if (MODE == 6) printf("PAR_PROFILE,%f,%f,%f,%f\n", route, reorder, copy, shuffle);
+    else printf("PROFILE,%f,%f,%f,%f,%f\n", route, reorder, copy, shuffle,
            online - route - reorder - copy - shuffle);
   }
   if (profile_offline && (MODE == 4 || MODE == 5 || MODE == 6)) {
@@ -556,7 +583,12 @@ int main(int argc, char *argv[]) {
       measured += phases[phase];
     }
     const double offline = calculateAve(gen_perm_time_array + WARMUP, REPEAT);
-    printf("OFFLINE_PROFILE,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%zu,%zu\n",
+    if (MODE == 6)
+      printf("PAR_OFFLINE_PROFILE,%f,%f,%f,%f,%f,%f,%f,%f,%f,%zu,%zu\n",
+             phases[0], phases[1], phases[2], phases[3], phases[4],
+             phases[5], phases[6], phases[7], phases[8],
+             offline_heap_peak_bytes, total_heap_peak_bytes);
+    else printf("OFFLINE_PROFILE,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%zu,%zu\n",
            phases[0], phases[1], phases[2], phases[3], phases[4],
            phases[5], phases[6], phases[7], phases[8], offline - measured,
            offline_heap_peak_bytes, total_heap_peak_bytes);

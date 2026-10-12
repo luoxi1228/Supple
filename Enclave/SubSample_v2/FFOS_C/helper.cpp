@@ -258,7 +258,7 @@ void CompactMarkToWorkspaceAndControl(const size_t *mark,
     size_t slice_bits,
     std::vector<uint8_t> &C,
     size_t bit_pos,
-    FfosCMarkWorkspace &ws)
+    FfosCMarkWorkspace &ws, supple_parallel::PackedBoundary *boundary)
 {
   const size_t dst_mark_words = MarkWords(slice_bits);
   ws.ensure_capacity(len_items, dst_mark_words);
@@ -315,9 +315,10 @@ void CompactMarkToWorkspaceAndControl(const size_t *mark,
       const uint8_t bit_mask = static_cast<uint8_t>(1U << bit_index);
       const uint8_t value_mask =
           static_cast<uint8_t>(0U - static_cast<uint8_t>(is_selected));
-      C[byte_index] =
-          static_cast<uint8_t>((C[byte_index] & ~bit_mask) |
-                               (value_mask & bit_mask));
+      const uint8_t original = boundary ? boundary->Read(C.data(), byte_index) : C[byte_index];
+      const uint8_t updated = static_cast<uint8_t>((original & ~bit_mask) | (value_mask & bit_mask));
+      if (boundary) boundary->Write(C.data(), byte_index, updated);
+      else C[byte_index] = updated;
     }
 
     bit_index++;

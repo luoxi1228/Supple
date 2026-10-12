@@ -35,12 +35,13 @@ Current experiment entrypoints are:
 The paper's FFOS-C and FFOS-FR use the code names `FFOS_C` (mode 4) and
 `FFOS_FR` (mode 5). Mode 5 executes one assembly OFork per gate, matching the
 per-gate OSWAP/OFork execution and counter-update policy of modes 1–5.
-`FFOS_FR_Opt` (FFOS-FR-Opt, mode 6) retains four-gate SSE2 data processing for
+`FFOS_FR_Par` (FFOS-FR-Par, mode 6) retains four-gate SSE2 data processing for
 8/16-byte records. Other widths and non-postorder shapes use the scalar fallback.
-Both FR variants share control generation, packed controls, layout, workspaces,
-timing boundaries and heap accounting; only their online gate backend differs.
+Mode 6 parallelizes offline control generation and online routing across frontier
+groups and independent subtrees, retaining the same packed tape and sample order.
+Mode 5 retains its serial strategy.
 Their sources live under `Enclave/SubSample_v2/FFOS_C`, `FFOS_FR` and
-`FFOS_FR_Opt`. Top-level result CSVs use these code names.
+`FFOS_FR_Par`. Top-level result CSVs use these code names.
 Existing top-level optimized `FFOS_FR.csv` results were moved byte-for-byte to
 `FFOS_FR_Opt.csv`; fresh mode 5 measurements go to a new `FFOS_FR.csv`. Historical result directories,
 reports and source snapshots retain their recorded names. The stage comparison
@@ -59,6 +60,13 @@ Useful options:
 - `--dry-run`: print generated `run_experiments.py` commands without running
 - `--stop-on-error`: stop immediately when any group fails
 - `--overwrite-first`: pass `--overwrite` only to the first group
+- `--threads`: override mode 6 thread budgets for all groups, e.g. `auto`, `4`,
+    or `1,2,4`
+
+Set `"threads": [4]` in `run.py`'s `BASE_CONFIG` to choose the default mode 6
+budget. Use `["auto"]` for automatic selection or `[1, 2, 4]` to test several
+budgets. Individual experiment groups can override this field; the CLI
+`--threads` option takes precedence over both.
 
 Default group layout in `run.py`:
 
@@ -87,7 +95,7 @@ From the project root:
     --overwrite
 ```
 
-To compare FFOS_C, per-gate FFOS_FR and FFOS_FR_Opt at one configuration:
+To compare FFOS_C, per-gate FFOS_FR and FFOS_FR_Par at one configuration:
 
 ```bash
 ./run_experiments.py --modes 4,5,6 --n 65536 --p 0.015625 \
@@ -105,7 +113,7 @@ and the SGX heap high-water mark for modes 4, 5 and 6. This runs each case a
 second time for diagnostics; the regular result CSV always uses the run
 without offline phase clocks. The diagnostic run writes
 `FFOS_C_offline_profile.csv`, `FFOS_FR_offline_profile.csv` and
-`FFOS_FR_Opt_offline_profile.csv` beside the
+`FFOS_FR_Par_offline_profile.csv` beside the
 regular results. `mark_ms`, `count_ms`, `swo_write_ms`, `tags_ms`,
 `normalize_ms`, `ofr_write_ms`, `replay_ms`, `project_ms`, `prepare_ms`, and
 `other_ms` sum to the diagnostic run's offline time, which can differ from the
@@ -127,6 +135,8 @@ updated by a normal run.
 - `--k`: comma-separated the number of samples (used when `--k-select 2`)
 - `--k-select`: `1` => `k = max(1, int(1/p))`; `2` => use `--k`
 - `--block-sizes`: comma-separated block sizes
+- `--threads`: `auto` or comma-separated positive thread budgets for mode 6;
+    defaults to `DEFAULT_THREADS` in the script (`["auto"]`, or e.g. `[1, 2, 4]`)
 - `--repeat`: measured rounds per configuration (default `5`)
 - `--warmup`: rounds excluded from the average before measurement (default `1`;
     use `0` to measure from the first round)
@@ -142,7 +152,7 @@ updated by a normal run.
 | 3 | CompactionBasedSWO | 10 |
 | 4 | FFOS_C | 6 |
 | 5 | FFOS_FR (per-gate OFork) | — |
-| 6 | FFOS_FR_Opt (four-gate SSE2) | former optimized mode 5 |
+| 6 | FFOS_FR_Par (four-gate SSE2) | former optimized mode 5 |
 | 10 | PSQF_single | 1 |
 | 11 | SubSample | 3 |
 | 12 | SubSampleMultiSlice | 4 |
@@ -186,7 +196,7 @@ Each mode writes to one CSV file:
 - `<RESULTS_FOLDER>/SubSampleMulti_opt.csv`
 - `<RESULTS_FOLDER>/FFOS_C.csv`
 - `<RESULTS_FOLDER>/FFOS_FR.csv`
-- `<RESULTS_FOLDER>/FFOS_FR_Opt.csv`
+- `<RESULTS_FOLDER>/FFOS_FR_Par.csv`
 - `<RESULTS_FOLDER>/ShuffleBasedSWO.csv`
 - `<RESULTS_FOLDER>/CompactionBasedSWO.csv`
 
@@ -308,3 +318,42 @@ Note:
     read local `.lg` files in each subfolder (such as `01_S&T.lg` ... `05_OptBatch.lg`).
 
 ------------------------------------------------------------------------
+
+## FFOS_FR_Par CPU scaling (mode 6)
+
+`FFOS_FR_THREADS=auto` (the default) uses the process affinity, limited by visible
+cgroup v1/v2 CPU quotas rounded up. A positive integer selects a budget no larger
+than that available CPU count. The main thread is included. A call uses at most
+K threads; nodes below 4096 records run serially. There is no fixed thread ceiling.
+
+In `run_experiments.py`, set `DEFAULT_THREADS = ["auto"]` for automatic selection,
+`[4]` for a single manual budget, or `[1, 2, 4]` to test multiple budgets.
+`--threads` overrides this default; modes other than 6 ignore the thread setting.
+
+```
+FFOS_FR_THREADS=auto ./Application/application 6 65536 16 .015625 64 3 1
+python3 run_experiments.py --modes 6 --threads 1,2,4 --n 65536 --k 64
+python3 tests/ffos_fr/run_parallel_benchmark.py --backend native --threads auto --output /tmp/par-scaling
+```
+
+GNU Make 4.3 or newer is required for grouped generated targets.
+Each `make` checks the target environment and generates `.build/Enclave.config.xml`
+and `.build/EnclaveCapacity.hpp` from the same CPU budget. A changed capacity
+recompiles the enclave and updates its signature in debug/prerelease builds.
+Release HW builds retain the existing external signing step, using the generated
+configuration. Rebuild and sign on a new machine before using its larger budget;
+insufficient compiled TCS capacity is an error. TCS stacks are reserved separately
+from `HeapMaxSize`: total stack reservation is `TCSNum * StackMaxSize`. The heap
+estimate includes concurrent worker scratch, plans and thread state.
+
+Fresh mode-6 results use `FFOS_FR_Par.csv`, adding `requested_threads` (0 means
+auto), `available_cpus`, and `effective_threads` (actual pool size). Historical
+`FFOS_FR_Opt.csv` data remains unchanged. `PAR_PROFILE` and `PAR_OFFLINE_PROFILE`
+report accumulated worker work in milliseconds; wall-clock phase totals remain
+`gen_perm_time` and `apply_perm_time`. No `other_ms` residual is computed for Par.
+Pool startup belongs to offline time and shutdown to online time.
+
+The first version parallelizes one sampling request. Mark and individual
+Compact/OFR networks retain their serial implementations. Leaf Shuffle keeps
+its existing behavior. Enclave concurrency across independent requests is outside
+this implementation's scope. Hardware scaling must be measured on an SGX machine.

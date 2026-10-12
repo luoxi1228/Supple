@@ -1,3 +1,4 @@
 plot/output/mode_*
 .codex/*
 .agents/*
+.build/

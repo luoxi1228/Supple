@@ -3,6 +3,7 @@
 #ifdef SUPPLE_MEMORY_TRACKING
 #include <cstdint>
 #include <limits>
+#include <pthread.h>
 
 extern "C" {
 void *__real_malloc(size_t);
@@ -19,7 +20,7 @@ constexpr size_t kSlots = 16384;
 constexpr size_t kMask = kSlots - 1;
 struct Entry { void *pointer; size_t bytes; };
 // BSS storage: no metadata heap allocation, no changes to user allocations.
-// The four supported experiment modes execute serially on one enclave thread.
+// All algorithm workers share this ledger under tracker_mutex.
 struct Tracker {
   Entry entries[kSlots];
   size_t current, peak, count;
@@ -83,18 +84,15 @@ struct Tracker {
   }
 };
 Tracker tracker{};
-// These modes use one serial ECALL and no worker threads. A global scope
-// pointer avoids a simulator TLS lookup for every allocation/free event.
-// It is also suspended while the allocator runs, excluding allocator-internal
-// bookkeeping and preventing nested API calls from being counted twice.
-Tracker *owner = nullptr;
+// The scope owner is shared; allocator recursion belongs to the current thread.
+// Serialize complete wrapped operations so realloc overlap and the live ledger
+// have a consistent order across workers. The guard prevents nested locking.
+Tracker *const owner = &tracker;
+pthread_mutex_t tracker_mutex = PTHREAD_MUTEX_INITIALIZER;
+thread_local bool inside_allocator = false;
 struct AllocatorCall {
-  Tracker **slot;
-  Tracker *state;
-  AllocatorCall(Tracker **slot, Tracker *state) : slot(slot), state(state) {
-    *slot = nullptr;
-  }
-  ~AllocatorCall() { *slot = state; }
+  AllocatorCall() { inside_allocator = true; pthread_mutex_lock(&tracker_mutex); }
+  ~AllocatorCall() { pthread_mutex_unlock(&tracker_mutex); inside_allocator = false; }
 };
 
 void Record(Tracker *state, void *pointer, size_t bytes) {
@@ -105,16 +103,18 @@ void Record(Tracker *state, void *pointer, size_t bytes) {
 
 namespace memory_profile {
 bool Begin() {
+  AllocatorCall call;
   if (tracker.active) { tracker.broken = true; return false; }
-  owner = &tracker;
   tracker.peak = tracker.current; // persistent scratch is part of this round
   tracker.active = true;
   return true;
 }
 void Fail() {
-  if (owner && owner->active) owner->broken = true;
+  AllocatorCall call;
+  if (owner->active) owner->broken = true;
 }
 void Finish(enc_ret *ret, bool completed) {
+  AllocatorCall call;
   ret->algorithm_heap_peak_bytes = tracker.peak;
   ret->memory_profile_status = completed && !tracker.broken
       ? MEMORY_PROFILE_VALID : MEMORY_PROFILE_INVALID;
@@ -125,19 +125,17 @@ void Finish(enc_ret *ret, bool completed) {
 } // namespace memory_profile
 
 extern "C" void *__wrap_malloc(size_t bytes) {
-  Tracker **slot = &owner;
-  Tracker *state = *slot;
+  Tracker *state = inside_allocator ? nullptr : owner;
   if (!state) return __real_malloc(bytes);
-  AllocatorCall call(slot, state);
+  AllocatorCall call;
   void *result = __real_malloc(bytes);
   Record(state, result, bytes);
   return result;
 }
 extern "C" void *__wrap_calloc(size_t count, size_t bytes) {
-  Tracker **slot = &owner;
-  Tracker *state = *slot;
+  Tracker *state = inside_allocator ? nullptr : owner;
   if (!state) return __real_calloc(count, bytes);
-  AllocatorCall call(slot, state);
+  AllocatorCall call;
   void *result = __real_calloc(count, bytes);
   if (state->active) {
     if (bytes && count > std::numeric_limits<size_t>::max() / bytes)
@@ -147,18 +145,16 @@ extern "C" void *__wrap_calloc(size_t count, size_t bytes) {
   return result;
 }
 extern "C" void __wrap_free(void *pointer) {
-  Tracker **slot = &owner;
-  Tracker *state = *slot;
+  Tracker *state = inside_allocator ? nullptr : owner;
   if (!state) { __real_free(pointer); return; }
-  AllocatorCall call(slot, state);
+  AllocatorCall call;
   state->Remove(pointer);
   __real_free(pointer);
 }
 extern "C" void *__wrap_realloc(void *pointer, size_t bytes) {
-  Tracker **owner_slot = &owner;
-  Tracker *state = *owner_slot;
+  Tracker *state = inside_allocator ? nullptr : owner;
   if (!state) return __real_realloc(pointer, bytes);
-  AllocatorCall call(owner_slot, state);
+  AllocatorCall call;
   const size_t slot = pointer ? state->Find(pointer) : 0;
   const bool owned = pointer && state->entries[slot].pointer;
   void *result = __real_realloc(pointer, bytes);
@@ -178,29 +174,26 @@ extern "C" void *__wrap_realloc(void *pointer, size_t bytes) {
   return result;
 }
 extern "C" void *__wrap_memalign(size_t alignment, size_t bytes) {
-  Tracker **slot = &owner;
-  Tracker *state = *slot;
+  Tracker *state = inside_allocator ? nullptr : owner;
   if (!state) return __real_memalign(alignment, bytes);
-  AllocatorCall call(slot, state);
+  AllocatorCall call;
   void *result = __real_memalign(alignment, bytes);
   Record(state, result, bytes);
   return result;
 }
 extern "C" int __wrap_posix_memalign(void **pointer, size_t alignment, size_t bytes) {
-  Tracker **slot = &owner;
-  Tracker *state = *slot;
+  Tracker *state = inside_allocator ? nullptr : owner;
   if (!state) return __real_posix_memalign(pointer, alignment, bytes);
-  AllocatorCall call(slot, state);
+  AllocatorCall call;
   const int status = __real_posix_memalign(pointer, alignment, bytes);
   if (status == 0) Record(state, *pointer, bytes);
   else if (state->active) state->broken = true;
   return status;
 }
 extern "C" void *__wrap_aligned_alloc(size_t alignment, size_t bytes) {
-  Tracker **slot = &owner;
-  Tracker *state = *slot;
+  Tracker *state = inside_allocator ? nullptr : owner;
   if (!state) return __real_aligned_alloc(alignment, bytes);
-  AllocatorCall call(slot, state);
+  AllocatorCall call;
   void *result = __real_aligned_alloc(alignment, bytes);
   Record(state, result, bytes);
   return result;

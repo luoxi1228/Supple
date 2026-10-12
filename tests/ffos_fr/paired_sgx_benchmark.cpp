@@ -22,8 +22,9 @@ constexpr size_t kMethodCount = 2;
 #else
 constexpr size_t kMethodCount = 3;
 #endif
+size_t requested_threads = 0;
 const char *MethodName(size_t method) {
-  static const char *names[] = {"FFOS_C", "FFOS_FR", "FFOS_FR_Opt"};
+  static const char *names[] = {"FFOS_C", "FFOS_FR", "FFOS_FR_Par"};
   return names[method];
 }
 void Require(bool ok, const char *message) {
@@ -104,12 +105,13 @@ void Run(const char *path, const char *name, size_t n, size_t m, size_t k,
         DecFFOS_C(enclave.id,input.data(),n,m,k,encrypted_width,output.data(),&ret) :
 #ifndef FFOS_LEGACY_SOURCE
         method == 2 ?
-        DecFFOS_FR_Opt(enclave.id,input.data(),n,m,k,encrypted_width,output.data(),&ret) :
+        DecFFOS_FR_Par(enclave.id,input.data(),n,m,k,encrypted_width,output.data(), requested_threads,&ret) :
 #endif
         DecFFOS_FR(enclave.id,input.data(),n,m,k,encrypted_width,output.data(),&ret);
       const double elapsed=std::chrono::duration<double,std::milli>(
           std::chrono::steady_clock::now()-start).count();
       Require(status==SGX_SUCCESS,"ECALL failed");
+      Require(method != 2 || ret.parallel_status == 0,"Parallel execution failed; check CPU/TCS capacity");
       Require(!memory || ret.memory_profile_status==MEMORY_PROFILE_VALID,
               "Invalid enclave heap measurement");
       Require(ret.ptime>0 && std::abs(ret.ptime-ret.gen_perm_time-ret.apply_perm_time)<0.1,
@@ -118,13 +120,14 @@ void Run(const char *path, const char *name, size_t n, size_t m, size_t k,
       // on each method's first measured output. Regression tests cover shapes.
       if (round==warmup) Verify(output,n,m,k,width,enclave.output_key);
       if (round<warmup) continue;
-      std::printf("%s,%zu,%zu,%zu,%zu,%s,%zu,%d,%d,%.6f,%.6f,%.6f,%.6f,%zu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+      std::printf("%s,%zu,%zu,%zu,%zu,%s,%zu,%d,%d,%.6f,%.6f,%.6f,%.6f,%zu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%zu,%zu,%zu\n",
         name,n,m,k,width,MethodName(method),round-warmup,
         int(memory),int(profile),ret.gen_perm_time,ret.apply_perm_time,
         ret.ptime,elapsed,ret.algorithm_heap_peak_bytes,ret.offline_mark_ms,
         ret.offline_count_ms,ret.offline_swo_write_ms,ret.offline_tags_ms,
         ret.offline_normalize_ms,ret.offline_ofr_write_ms,ret.offline_replay_ms,
-        ret.offline_project_ms,ret.offline_prepare_ms);
+        ret.offline_project_ms,ret.offline_prepare_ms,
+        ret.requested_threads,ret.available_cpus,ret.effective_threads);
       std::fflush(stdout);
     }
   }
@@ -140,6 +143,7 @@ int main(int argc,char **argv) {
       if (token=="--matrix") matrix=true;
       else if (token=="--memory") memory=true;
       else if (token=="--profile") profile=true;
+      else if (token=="--threads" && arg+1<argc) { const std::string value(argv[++arg]); requested_threads = value == "auto" ? 0 : std::stoull(value); }
       else if (token=="--rounds" && arg+1<argc) rounds=std::stoull(argv[++arg]);
       else if (token=="--warmup" && arg+1<argc) warmup=std::stoull(argv[++arg]);
       else if (token=="--case" && arg+4<argc) {
@@ -148,7 +152,7 @@ int main(int argc,char **argv) {
       } else throw std::invalid_argument("Unknown benchmark argument");
     }
     Require(rounds>0 && warmup<=SIZE_MAX-rounds,"Invalid round count");
-    std::puts("case,n,m,k,width,method,round,memory_tracking,profile,offline_ms,online_ms,total_ms,ecall_ms,algorithm_heap_peak_bytes,mark_ms,count_ms,swo_write_ms,tags_ms,normalize_ms,write_ms,replay_ms,project_ms,prepare_ms");
+    std::puts("case,n,m,k,width,method,round,memory_tracking,profile,offline_ms,online_ms,total_ms,ecall_ms,algorithm_heap_peak_bytes,mark_work_ms,count_work_ms,swo_write_work_ms,tags_work_ms,normalize_work_ms,write_work_ms,replay_work_ms,project_work_ms,prepare_work_ms,requested_threads,available_cpus,effective_threads");
     if (n) Run(argv[1],"custom",n,m,k,width,rounds,warmup,memory,profile);
     else if (matrix) {
       for (size_t size : {size_t(1)<<16,size_t(1)<<18,size_t(1)<<20,

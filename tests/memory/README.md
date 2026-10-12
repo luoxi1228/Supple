@@ -7,7 +7,7 @@ overlap without depending on allocation calls inside a dynamically linked
 host standard library. Production uses the SGX static C++ runtime.
 
 Run `bash tests/memory/run_sgx_tests.sh` from an SDK/SGX SIM environment for
-real ECALL, AES-GCM, PRB, Shuffle, CompactionBasedSWO, FFOS_C, FFOS_FR and FFOS_FR_Opt integration. The build
+real ECALL, AES-GCM, PRB, Shuffle, CompactionBasedSWO, FFOS_C, FFOS_FR and FFOS_FR_Par integration. The build
 uses the existing test-only PIC/TLS overlay and creates the signed enclave,
 host library and executables under `/tmp`; it does not replace the tracked
 application binaries or result CSVs. All six modes are tested with
@@ -17,7 +17,7 @@ tests specialized/generic record widths, N=1, M=1/M=N, overflow and failed
 output allocation. Production enclave objects are rebuilt with
 the SIM overlay; rebuild with the production Makefile before hardware runs.
 
-FFOS_C, FFOS_FR and FFOS_FR_Opt must report identical peaks across repeated identical
+FFOS_C, FFOS_FR and FFOS_FR_Par must report identical peaks across repeated identical
 ECALLs under `TCSPolicy=1`. Their selection scratch is owned by each control
 generation/apply call, shared across serial recursive compactions, and freed
 on return or exception; it does not depend on TLS surviving the next ECALL.

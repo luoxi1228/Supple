@@ -9,6 +9,7 @@ import tempfile
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location("experiments", ROOT / "run_experiments.py")
 experiments = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(experiments)
@@ -46,8 +47,8 @@ def main(build):
             assert experiments.main() == 0
             assert {path.name for path in results.glob("*.csv")} == {
                 "ShuffleBasedSWO.csv", "PSQF_SWO.csv", "CompactionBasedSWO.csv",
-                "FFOS_C.csv", "FFOS_FR.csv", "FFOS_FR_Opt.csv", "FFOS_C_offline_profile.csv",
-                "FFOS_FR_offline_profile.csv", "FFOS_FR_Opt_offline_profile.csv"}
+                "FFOS_C.csv", "FFOS_FR.csv", "FFOS_FR_Par.csv", "FFOS_C_offline_profile.csv",
+                "FFOS_FR_offline_profile.csv", "FFOS_FR_Par_offline_profile.csv"}
             for mode in (2, 4, 5, 6, 1, 3):
                 path = results / (experiments.MODE_INFO[mode]["name"] + ".csv")
                 with path.open() as source:

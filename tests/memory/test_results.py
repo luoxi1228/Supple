@@ -3,12 +3,14 @@ import csv
 import importlib.util
 import io
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location("experiments", ROOT / "run_experiments.py")
 experiments = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(experiments)
@@ -21,21 +23,27 @@ class MemoryResultsTest(unittest.TestCase):
                                    block_sizes="24", repeat=1, warmup=0,
                                    k_select=2, results_folder=directory,
                                    overwrite=False, offline_profile=True)
-            output = ("1\n2\n3\n4\n5\nMEMORY,1048576\nOFFLINE_PROFILE," +
+            output = ("1\n2\n3\n4\n5\nMEMORY,1048576\nPARALLEL,0,8,1\nOFFLINE_PROFILE," +
                       ",".join(["0"] * 12) + "\n")
-            process = SimpleNamespace(returncode=0, stdout=output.encode(), stderr=b"")
+            def process(command, **kwargs):
+                result = output
+                if command[0] != "make" and command[1] == "6":
+                    result = result.replace("OFFLINE_PROFILE," + ",".join(["0"] * 12),
+                                            "PAR_OFFLINE_PROFILE," + ",".join(["0"] * 11))
+                return SimpleNamespace(returncode=0, stdout=result.encode(), stderr=b"")
             with mock.patch.object(experiments, "parse_args", return_value=args), \
                  mock.patch.object(experiments, "estimate_heap", return_value=1048576), \
-                 mock.patch.object(experiments.subprocess, "run", return_value=process):
+                 mock.patch.object(experiments.subprocess, "run", side_effect=process):
                 self.assertEqual(experiments.main(), 0)
             self.assertEqual({path.name for path in Path(directory).iterdir()}, {
-                "FFOS_C.csv", "FFOS_FR.csv", "FFOS_FR_Opt.csv",
+                "FFOS_C.csv", "FFOS_FR.csv", "FFOS_FR_Par.csv",
                 "FFOS_C_offline_profile.csv", "FFOS_FR_offline_profile.csv",
-                "FFOS_FR_Opt_offline_profile.csv"})
-            for name in ("FFOS_C", "FFOS_FR", "FFOS_FR_Opt"):
+                "FFOS_FR_Par_offline_profile.csv"})
+            for name in ("FFOS_C", "FFOS_FR", "FFOS_FR_Par"):
                 rows = (Path(directory) / (name + "_offline_profile.csv")).read_text().splitlines()
                 self.assertEqual(len(rows), 2)
                 self.assertIn("total_heap_peak_bytes", rows[0])
+                self.assertEqual(len(rows[0].split(",")), len(rows[1].split(",")))
 
     def test_ffos_fr_balanced_frontier_counts(self):
         self.assertEqual(experiments.ffos_fr_frontier(25, 5, 21),
@@ -53,7 +61,7 @@ class MemoryResultsTest(unittest.TestCase):
             3: ("CompactionBasedSWO", True, True, False, 1687552, 1),
             4: ("FFOS_C", True, True, False, 2215936, 1),
             5: ("FFOS_FR", True, True, False, 2146304, 1),
-            6: ("FFOS_FR_Opt", True, True, False, 2146304, 1),
+            6: ("FFOS_FR_Par", True, True, False, 2240512, 1),
             10: ("PSQF_single", False, False, True, 1187840, 1),
             11: ("SubSample", False, False, True, 1187840, 1),
             12: ("SubSampleMultiSlice", True, True, False, 1998848, 1),
@@ -66,7 +74,7 @@ class MemoryResultsTest(unittest.TestCase):
         for mode, (name, needs_k, detailed, fixed_k, heap, tcs) in expected.items():
             self.assertEqual(experiments.MODE_INFO[mode], dict(
                 name=name, needs_k=needs_k, detailed=detailed, fixed_k=fixed_k))
-            with mock.patch.object(experiments, "write_heap_config") as config:
+            with mock.patch.object(experiments, "available_cpus", return_value=1), mock.patch.object(experiments, "write_heap_config") as config:
                 self.assertEqual(experiments.estimate_heap(
                     mode, 4096, 16, .015625, k_value=128), heap)
                 config.assert_called_once_with(heap, tcs)
@@ -214,14 +222,14 @@ class MemoryResultsTest(unittest.TestCase):
                     return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
                 mode = int(command[1])
                 numbers = "1\n2\n5\n" if mode == 2 else "1\n2\n3\n4\n5\n"
-                return SimpleNamespace(returncode=0, stdout=(numbers + "MEMORY,1048576\n").encode(), stderr=b"")
+                return SimpleNamespace(returncode=0, stdout=(numbers + "MEMORY,1048576\nPARALLEL,0,8,1\n").encode(), stderr=b"")
             with mock.patch.object(experiments, "parse_args", return_value=args), \
                  mock.patch.object(experiments, "estimate_heap", return_value=64 * 1048576), \
                  mock.patch.object(experiments.subprocess, "run", side_effect=process):
                 self.assertEqual(experiments.main(), 0)
             for mode in (2, 4, 5, 6, 1, 3):
                 path = Path(directory) / (experiments.MODE_INFO[mode]["name"] + ".csv")
-                self.assertEqual(path.read_text().splitlines()[-1].split(",")[-1], "1.0")
+                self.assertEqual(list(csv.DictReader(io.StringIO(path.read_text())))[-1]["algorithm_heap_peak_mib"], "1.0")
             args.results_folder = str(Path(directory) / "failed")
             failure = SimpleNamespace(returncode=0, stdout=b"1\n2\n3\n4\n5\n", stderr=b"")
             with mock.patch.object(experiments, "parse_args", return_value=args), \
@@ -239,7 +247,7 @@ class MemoryResultsTest(unittest.TestCase):
             self.assertEqual(experiments.parse_memory_peak(output), 1048576)
             result = experiments.make_result(mode, 2, parsed, 1048576 / 1048576)
             self.assertEqual(experiments.format_csv_line(mode, 16, .5, 16, result).split(",")[-1], "1.0\n")
-            self.assertTrue(experiments.result_csv_header(mode).endswith("algorithm_heap_peak_mib\n"))
+            self.assertIn("algorithm_heap_peak_mib", experiments.result_csv_header(mode))
         self.assertTrue(experiments.result_csv_header(13).endswith("heap_est_mb\n"))
         for output in ("", "MEMORY,-1", "MEMORY,1.5", "MEMORY,", "MEMORY,1,2",
                        "MEMORY,1\nMEMORY,2", "MEMORY,١"):
@@ -250,7 +258,7 @@ class MemoryResultsTest(unittest.TestCase):
             for mode in (2, 4, 5, 6, 1, 3):
                 path = Path(directory) / f"mode{mode}.csv"
                 header = experiments.result_csv_header(mode)
-                row = "16,.5,16,2," + ("1,2,3,4,5,6\n" if mode != 2 else "1,2,5,6\n")
+                row = "16,.5,16,2," + ("1,2,3,4,5,6,0,8,1\n" if mode == 6 else "1,2,3,4,5,6\n" if mode != 2 else "1,2,5,6\n")
                 old_header = header.replace("algorithm_heap_peak_mib", "heap_est_mb")
                 for index, original in enumerate((row, old_header + row)):
                     path.write_text(original)

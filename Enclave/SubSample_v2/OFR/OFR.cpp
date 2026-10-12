@@ -698,8 +698,8 @@ inline void RouteMembershipGate(size_t *first, size_t *second,
   }
 }
 
-template <bool PostOrder, bool RouteWords = false>
-size_t OFRBalanceLayer(uint8_t *tags, PackedControls &controls,
+template <bool PostOrder, bool RouteWords = false, class Controls = PackedControls>
+size_t OFRBalanceLayer(uint8_t *tags, Controls &controls,
                        uint8_t *scratch, const size_t *postorder_starts,
                        size_t root_n, size_t base, size_t stride, size_t n,
                        size_t n_left, size_t n_right, size_t position,
@@ -811,9 +811,9 @@ size_t OFRBalanceLayer(uint8_t *tags, PackedControls &controls,
 
     const uint8_t control = GateControlForBalancedPair(x, y, top_tag);
     if (PostOrder)
-      controls[postorder_starts[node_base + gate] + base] = control;
+      controls.set(postorder_starts[node_base + gate] + base, control);
     else
-      controls[position + gate] = control;
+      controls.set(position + gate, control);
     if (RouteWords)
       RouteMembershipGate(rows + first * words_per_row,
                            rows + (first + stride) * words_per_row,
@@ -836,8 +836,9 @@ size_t OFRBalanceInPlaceImpl(uint8_t *tags, PackedControls &controls, uint8_t *s
                                 base, stride, n, n_left, n_right, position);
 }
 
+template<class Controls>
 size_t OFRControlWriteAndRouteImpl(
-    uint8_t *tags, PackedControls &controls, uint8_t *scratch,
+    uint8_t *tags, Controls &controls, uint8_t *scratch,
     size_t *rows, size_t words_per_row,
     size_t base, size_t stride, size_t n,
     size_t n_left, size_t n_right, size_t position)
@@ -847,7 +848,7 @@ size_t OFRControlWriteAndRouteImpl(
   if (n == 2)
   {
     const uint8_t control = static_cast<uint8_t>(OFR_TAG_BOTH ^ tags[base]);
-    controls[position] = control;
+    controls.set(position, control);
     RouteMembershipGate(rows + base * words_per_row,
                          rows + (base + stride) * words_per_row,
                          words_per_row, control);
@@ -1988,7 +1989,7 @@ size_t detail::OFRControlWriteAndRouteNormalized(
     std::vector<uint8_t> &tags, PackedControls &controls,
     size_t *rows, size_t words_per_row, size_t n,
     size_t n_left, size_t n_right, size_t position, size_t control_count,
-    std::vector<uint8_t> *feature_scratch)
+    std::vector<uint8_t> *feature_scratch, supple_parallel::PackedBoundary *boundary)
 {
   ValidateCapacities(n, n_left, n_right);
   size_t row_words = 0, row_bytes = 0;
@@ -2003,12 +2004,13 @@ size_t detail::OFRControlWriteAndRouteNormalized(
   std::vector<uint8_t> local_scratch;
   std::vector<uint8_t> &scratch = feature_scratch ? *feature_scratch : local_scratch;
   scratch.resize(n / 2);
+  auto destination = controls.mutable_view(position, control_count, boundary);
   const size_t next = OFRControlWriteAndRouteImpl(
-      tags.data(), controls, scratch.data(), rows, words_per_row,
-      0, 1, n, n_left, n_right, position);
-  if (next - position != control_count)
+      tags.data(), destination, scratch.data(), rows, words_per_row,
+      0, 1, n, n_left, n_right, 0);
+  if (next != control_count)
     throw std::logic_error("OFR normalized control count mismatch");
-  return next;
+  return position + next;
 }
 
 size_t OFRControlWritePostOrderAndRoute(std::vector<uint8_t> &tags,
@@ -2026,7 +2028,8 @@ size_t OFRControlWritePostOrderAndRoute(std::vector<uint8_t> &tags,
 size_t detail::OFRControlWritePostOrderAndRouteNormalized(
     std::vector<uint8_t> &tags, PackedControls &controls,
     size_t *rows, size_t words_per_row, size_t n,
-    size_t n_left, size_t n_right, size_t position, size_t control_count)
+    size_t n_left, size_t n_right, size_t position, size_t control_count,
+    supple_parallel::PackedBoundary *boundary)
 {
   ValidateCapacities(n, n_left, n_right);
   if (!IsBalancedPowerOfTwo(n, n_left, n_right))
@@ -2041,7 +2044,7 @@ size_t detail::OFRControlWritePostOrderAndRouteNormalized(
   if (position > controls.size() || control_count > controls.size() - position)
     throw std::length_error("OFR control write exceeds destination array");
   OFRControlPostOrderTiledImpl<true>(
-      tags.data(), controls.mutable_view(position, control_count),
+      tags.data(), controls.mutable_view(position, control_count, boundary),
       rows, words_per_row, n);
   return position + control_count;
 }
@@ -2276,6 +2279,9 @@ void OFRApplyPreparedPostOrderInPlace(
     size_t n_right,
     size_t block_size, bool use_four_gate_sse2)
 {
+#ifdef BEFTS_MODE
+  (void)use_four_gate_sse2;
+#endif
   OFRApplyPreparedPostOrderInPlace(
       data, postorder_controls.view(),
       n, n_left, n_right, block_size, use_four_gate_sse2);
@@ -2285,6 +2291,9 @@ void OFRApplyPreparedPostOrderInPlace(
     unsigned char *data, PackedControlView postorder_controls, size_t n, size_t n_left, size_t n_right,
     size_t block_size, bool use_four_gate_sse2)
 {
+#ifdef BEFTS_MODE
+  (void)use_four_gate_sse2;
+#endif
   ValidateCapacities(n, n_left, n_right);
   size_t data_bytes = 0;
   if (!IsBalancedPowerOfTwo(n, n_left, n_right) ||

@@ -1,0 +1,80 @@
+PASS mode=1 n=64 m=16 k=1 round=0 peak=103607
+PASS mode=1 n=64 m=16 k=1 round=1 peak=103671
+PASS mode=1 n=64 m=16 k=1 round=2 peak=103735
+PASS mode=1 n=64 m=16 k=2 round=0 peak=103991
+PASS mode=1 n=64 m=16 k=2 round=1 peak=104055
+PASS mode=1 n=64 m=16 k=2 round=2 peak=104119
+PASS mode=1 n=64 m=16 k=4 round=0 peak=104759
+PASS mode=1 n=64 m=16 k=4 round=1 peak=104823
+PASS mode=1 n=64 m=16 k=4 round=2 peak=104887
+PASS mode=1 n=64 m=16 k=8 round=0 peak=106295
+PASS mode=1 n=64 m=16 k=8 round=1 peak=106359
+PASS mode=1 n=64 m=16 k=8 round=2 peak=106423
+sgx_rijndael128GCM_decrypt failure (3001)
+PASS mode=2 n=64 m=16 k=1 round=0 peak=110111
+PASS mode=2 n=64 m=16 k=1 round=1 peak=110175
+PASS mode=2 n=64 m=16 k=1 round=2 peak=110239
+PASS mode=2 n=64 m=16 k=2 round=0 peak=110111
+PASS mode=2 n=64 m=16 k=2 round=1 peak=110175
+PASS mode=2 n=64 m=16 k=2 round=2 peak=110239
+PASS mode=2 n=64 m=16 k=4 round=0 peak=110111
+PASS mode=2 n=64 m=16 k=4 round=1 peak=110175
+PASS mode=2 n=64 m=16 k=4 round=2 peak=110239
+PASS mode=2 n=64 m=16 k=8 round=0 peak=110111
+PASS mode=2 n=64 m=16 k=8 round=1 peak=110175
+PASS mode=2 n=64 m=16 k=8 round=2 peak=110239
+PSQF_SWO: N % M != 0, falling back to single sample
+sgx_rijndael128GCM_decrypt failure (3001)
+PASS mode=3 n=64 m=16 k=1 round=0 peak=103543
+PASS mode=3 n=64 m=16 k=1 round=1 peak=103543
+PASS mode=3 n=64 m=16 k=1 round=2 peak=103543
+PASS mode=3 n=64 m=16 k=2 round=0 peak=103927
+PASS mode=3 n=64 m=16 k=2 round=1 peak=103927
+PASS mode=3 n=64 m=16 k=2 round=2 peak=103927
+PASS mode=3 n=64 m=16 k=4 round=0 peak=104695
+PASS mode=3 n=64 m=16 k=4 round=1 peak=104695
+PASS mode=3 n=64 m=16 k=4 round=2 peak=104695
+PASS mode=3 n=64 m=16 k=8 round=0 peak=106231
+PASS mode=3 n=64 m=16 k=8 round=1 peak=106231
+PASS mode=3 n=64 m=16 k=8 round=2 peak=106231
+sgx_rijndael128GCM_decrypt failure (3001)
+PASS mode=4 n=64 m=16 k=1 round=0 peak=104164
+PASS mode=4 n=64 m=16 k=1 round=1 peak=104164
+PASS mode=4 n=64 m=16 k=1 round=2 peak=104164
+PASS mode=4 n=64 m=16 k=2 round=0 peak=104572
+PASS mode=4 n=64 m=16 k=2 round=1 peak=104572
+PASS mode=4 n=64 m=16 k=2 round=2 peak=104572
+PASS mode=4 n=64 m=16 k=4 round=0 peak=106148
+PASS mode=4 n=64 m=16 k=4 round=1 peak=106148
+PASS mode=4 n=64 m=16 k=4 round=2 peak=106148
+PASS mode=4 n=64 m=16 k=8 round=0 peak=109340
+PASS mode=4 n=64 m=16 k=8 round=1 peak=109340
+PASS mode=4 n=64 m=16 k=8 round=2 peak=109340
+sgx_rijndael128GCM_decrypt failure (3001)
+PASS mode=5 n=64 m=16 k=1 round=0 peak=104188
+PASS mode=5 n=64 m=16 k=1 round=1 peak=104188
+PASS mode=5 n=64 m=16 k=1 round=2 peak=104188
+PASS mode=5 n=64 m=16 k=2 round=0 peak=104620
+PASS mode=5 n=64 m=16 k=2 round=1 peak=104620
+PASS mode=5 n=64 m=16 k=2 round=2 peak=104620
+PASS mode=5 n=64 m=16 k=4 round=0 peak=104959
+PASS mode=5 n=64 m=16 k=4 round=1 peak=104959
+PASS mode=5 n=64 m=16 k=4 round=2 peak=104959
+PASS mode=5 n=64 m=16 k=8 round=0 peak=107208
+PASS mode=5 n=64 m=16 k=8 round=1 peak=107208
+PASS mode=5 n=64 m=16 k=8 round=2 peak=107208
+sgx_rijndael128GCM_decrypt failure (3001)
+PASS mode=6 n=64 m=16 k=1 round=0 peak=104869
+PASS mode=6 n=64 m=16 k=1 round=1 peak=104869
+PASS mode=6 n=64 m=16 k=1 round=2 peak=104869
+PASS mode=6 n=64 m=16 k=2 round=0 peak=105661
+PASS mode=6 n=64 m=16 k=2 round=1 peak=105661
+PASS mode=6 n=64 m=16 k=2 round=2 peak=105661
+PASS mode=6 n=64 m=16 k=4 round=0 peak=106601
+PASS mode=6 n=64 m=16 k=4 round=1 peak=106601
+PASS mode=6 n=64 m=16 k=4 round=2 peak=106601
+PASS mode=6 n=64 m=16 k=8 round=0 peak=110361
+PASS mode=6 n=64 m=16 k=8 round=1 peak=110361
+PASS mode=6 n=64 m=16 k=8 round=2 peak=110361
+sgx_rijndael128GCM_decrypt failure (3001)
+PASS: compaction dispatch widths, edge dimensions and allocation failure

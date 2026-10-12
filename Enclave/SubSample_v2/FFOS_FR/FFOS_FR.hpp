@@ -92,7 +92,14 @@ std::vector<unsigned char> FFOS_FR(
 namespace ffos_fr_detail {
 void DecWithBackend(unsigned char *encrypted_buffer,
     size_t N, size_t M, size_t K, size_t encrypted_block_size,
-    unsigned char *encrypt_result_buffer, enc_ret *ret, FFOS_FRBackend backend);
+    unsigned char *encrypt_result_buffer, enc_ret *ret, FFOS_FRBackend backend,
+    size_t nthreads = 0, bool parallel = false);
+FFOS_FRControls ParallelControl(const std::vector<size_t> &,
+    const std::vector<FrontierNode> &, size_t, size_t, size_t, enc_ret *, size_t);
+std::vector<unsigned char> ParallelApply(const unsigned char *, const FFOS_FRControls &,
+    const std::vector<FrontierNode> &, size_t, size_t, size_t, size_t, size_t);
+std::vector<unsigned char> ParallelSample(const unsigned char *,
+    size_t, size_t, size_t, size_t, size_t);
 }
 
 extern "C" void DecFFOS_FR(unsigned char *encrypted_buffer,

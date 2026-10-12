@@ -30,7 +30,7 @@ def snapshot(source, build):
         ["git", "ls-files", "-z"], cwd=source).decode().split("\0")
     paths += subprocess.check_output(
         ["git", "ls-files", "--others", "--exclude-standard", "-z",
-         "Enclave", "tests"], cwd=source).decode().split("\0")
+         "Enclave", "tests", "Untrusted", "cpu_budget.py"], cwd=source).decode().split("\0")
     digest = hashlib.sha256()
     for name in sorted(set(paths)):
         path = source / name
@@ -72,7 +72,9 @@ def restore_stage(source, stage, build, commit):
                "tests/ffos_fr/paired_sgx_benchmark.cpp",
                "tests/ffos_fr/legacy_source.hpp",
                "tests/ffos_c/host_support.hpp",
-               "tests/ffos_c/sgx_smoke.mk")
+               "tests/ffos_c/sgx_smoke.mk",
+               "Enclave/ThreadPool.cpp", "Enclave/ThreadPool.hpp",
+               "Untrusted/CpuBudget.hpp")
     for name in harness:
         target = build / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -95,7 +97,8 @@ def build_sgx(build, output, backend, heap):
     run(command, build, output / "enclave_build.log")
     config = ET.parse(build / "Enclave/Enclave.config.xml")
     config.find("HeapMaxSize").text = hex(heap)
-    config.find("TCSNum").text = "1"
+    config.find("TCSNum").text = (ET.parse(build / ".build/Enclave.config.xml").find("TCSNum").text
+                                   if (build / ".build/Enclave.config.xml").exists() else "1")
     config.write(build / "benchmark.config.xml", encoding="unicode")
     run([sdk / "bin/x64/sgx_sign", "sign", "-key",
          build / "Enclave/Enclave_private.pem", "-enclave", build / "enclave.so",
@@ -135,6 +138,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", type=Path,
                         default=Path(__file__).resolve().parents[2])
+    parser.add_argument("--threads", default="auto", help="auto or one positive budget; use run_parallel_benchmark.py for scaling")
     parser.add_argument("--stage", required=True)
     parser.add_argument("--from-stage", type=Path,
                         help="restore a recorded stage's source.patch and packed header")
@@ -204,6 +208,7 @@ def main():
         else:
             base = build_sgx(build, output, args.backend, args.heap)
             base += ["--rounds", str(args.rounds), "--warmup", str(args.warmup)]
+        base += ["--threads", args.threads]
         (output / (artifact_prefix + "_command.json")).write_text(json.dumps(
             [str(x) for x in base], indent=2) + "\n")
         if args.build_only:
