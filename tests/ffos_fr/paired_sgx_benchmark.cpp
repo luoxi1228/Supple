@@ -20,11 +20,11 @@ namespace {
 #ifdef FFOS_LEGACY_SOURCE
 constexpr size_t kMethodCount = 2;
 #else
-constexpr size_t kMethodCount = 3;
+constexpr size_t kMethodCount = 4;
 #endif
 size_t requested_threads = 0;
 const char *MethodName(size_t method) {
-  static const char *names[] = {"FFOS_C", "FFOS_FR", "FFOS_FR_Par"};
+  static const char *names[] = {"FFOS_C", "FFOS_FR", "FFOS_FR_Par", "FFOS_C_Opt"};
   return names[method];
 }
 void Require(bool ok, const char *message) {
@@ -104,6 +104,8 @@ void Run(const char *path, const char *name, size_t n, size_t m, size_t k,
       const auto status=method == 0 ?
         DecFFOS_C(enclave.id,input.data(),n,m,k,encrypted_width,output.data(),&ret) :
 #ifndef FFOS_LEGACY_SOURCE
+        method == 3 ?
+        DecFFOS_C_Opt(enclave.id,input.data(),n,m,k,encrypted_width,output.data(),&ret) :
         method == 2 ?
         DecFFOS_FR_Par(enclave.id,input.data(),n,m,k,encrypted_width,output.data(), requested_threads,&ret) :
 #endif

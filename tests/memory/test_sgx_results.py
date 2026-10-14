@@ -37,7 +37,7 @@ def main(build):
         config = directory / "Enclave.config.xml"
         config.write_bytes((ROOT / "Enclave/Enclave.config.xml").read_bytes())
         results = directory / "results"
-        args = ["run_experiments.py", "--modes", "1,2,3,4,5,6", "--n", "64", "--p", ".25",
+        args = ["run_experiments.py", "--modes", "1,2,3,4,5,6,7", "--n", "64", "--p", ".25",
                 "--k", "2", "--block-sizes", "24", "--repeat", "2", "--warmup", "2",
                 "--results-folder", str(results), "--offline-profile"]
         with mock.patch.object(experiments, "APP_DIR", build), \
@@ -48,8 +48,9 @@ def main(build):
             assert {path.name for path in results.glob("*.csv")} == {
                 "ShuffleBasedSWO.csv", "PSQF_SWO.csv", "CompactionBasedSWO.csv",
                 "FFOS_C.csv", "FFOS_FR.csv", "FFOS_FR_Par.csv", "FFOS_C_offline_profile.csv",
-                "FFOS_FR_offline_profile.csv", "FFOS_FR_Par_offline_profile.csv"}
-            for mode in (2, 4, 5, 6, 1, 3):
+                "FFOS_FR_offline_profile.csv", "FFOS_FR_Par_offline_profile.csv",
+                "FFOS_C_Opt.csv", "FFOS_C_Opt_offline_profile.csv"}
+            for mode in (2, 4, 5, 6, 7, 1, 3):
                 path = results / (experiments.MODE_INFO[mode]["name"] + ".csv")
                 with path.open() as source:
                     rows = list(csv.DictReader(source))
@@ -60,17 +61,17 @@ def main(build):
                 old = path.read_text().replace("algorithm_heap_peak_mib", "heap_est_mb")
                 path.write_text(old)
             assert experiments.main() == 0
-            for mode in (2, 4, 5, 6, 1, 3):
+            for mode in (2, 4, 5, 6, 7, 1, 3):
                 name = experiments.MODE_INFO[mode]["name"]
                 assert (results / f"{name}.heap_est_backup.csv").is_file()
                 with (results / f"{name}.csv").open() as source:
                     assert len(list(csv.DictReader(source))) == 1
             assert experiments.main() == 0
-            for mode in (2, 4, 5, 6, 1, 3):
+            for mode in (2, 4, 5, 6, 7, 1, 3):
                 name = experiments.MODE_INFO[mode]["name"]
                 with (results / f"{name}.csv").open() as source:
                     assert len(list(csv.DictReader(source))) == 2
-        for mode in (4, 5, 6):
+        for mode in (4, 5, 6, 7):
             profile = results / (experiments.MODE_INFO[mode]["name"] + "_offline_profile.csv")
             with profile.open() as source:
                 rows = list(csv.DictReader(source))
@@ -100,7 +101,7 @@ def main(build):
                 assert experiments.parse_memory_peak(result.stdout) > 0
             else:
                 assert experiments.parse_memory_peak(result.stdout) is None
-        for mode in (7, 8, 9, 14):
+        for mode in (8, 9, 14):
             command = [str(build / "application"), str(mode), "64", "24", ".25", "1", "0"]
             result = run(command, cwd=build, env=env, capture_output=True, text=True)
             assert result.returncode != 0

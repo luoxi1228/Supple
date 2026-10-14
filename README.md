@@ -40,6 +40,11 @@ per-gate OSWAP/OFork execution and counter-update policy of modes 1–5.
 Mode 6 parallelizes offline control generation and online routing across frontier
 groups and independent subtrees, retaining the same packed tape and sample order.
 Mode 5 retains its serial strategy.
+`FFOS_C_Opt` (mode 7) preserves FFOS-C's packed selection tape and scalar
+compaction gates while adopting FR's output-slice recursion, explicit capacity
+reservation, owned membership processing and offline/online lifetimes.
+Compare modes **5 and 7** for serial FR versus optimized C. Mode 4 retains
+the original implementation. See [design and validation](tests/ffos_c_opt/README.md).
 Their sources live under `Enclave/SubSample_v2/FFOS_C`, `FFOS_FR` and
 `FFOS_FR_Par`. Top-level result CSVs use these code names.
 Existing top-level optimized `FFOS_FR.csv` results were moved byte-for-byte to
@@ -153,6 +158,7 @@ updated by a normal run.
 | 4 | FFOS_C | 6 |
 | 5 | FFOS_FR (per-gate OFork) | — |
 | 6 | FFOS_FR_Par (four-gate SSE2) | former optimized mode 5 |
+| 7 | FFOS_C_Opt (output-slice recursion) | — |
 | 10 | PSQF_single | 1 |
 | 11 | SubSample | 3 |
 | 12 | SubSampleMultiSlice | 4 |
@@ -195,12 +201,13 @@ Each mode writes to one CSV file:
 - `<RESULTS_FOLDER>/SubSampleMultiSlice.csv`
 - `<RESULTS_FOLDER>/SubSampleMulti_opt.csv`
 - `<RESULTS_FOLDER>/FFOS_C.csv`
+- `<RESULTS_FOLDER>/FFOS_C_Opt.csv`
 - `<RESULTS_FOLDER>/FFOS_FR.csv`
 - `<RESULTS_FOLDER>/FFOS_FR_Par.csv`
 - `<RESULTS_FOLDER>/ShuffleBasedSWO.csv`
 - `<RESULTS_FOLDER>/CompactionBasedSWO.csv`
 
-Modes `1`, `2`, `3`, `4`, `5`, and `6` write the column names on the first line and
+Modes `1`, `2`, `3`, `4`, `5`, `6`, and `7` write the column names on the first line and
 leave one blank line between separate executions of `run_experiments.py`.
 Existing headerless files and files with a `heap_est_mb` header are preserved as
 `<mode>.heap_est_backup.csv` before a new result file is started; collisions
@@ -224,13 +231,13 @@ Columns:
 Mode `2` uses `ecall_time_ms` and `ptime_ms` in its CSV header.
 Its final column is `algorithm_heap_peak_mib` instead of `heap_est_mb`.
 
-## 3.3 Modes 1/3/4/5/12/13
+## 3.3 Modes 1/3/4/5/7/12/13
 
 Columns:
 
 `block_size, p, n, k, ecall_time, ptime, gen_perm(offline), apply_perm(online), oswaps, heap_est_mb`
 
-Modes `1`, `3`, `4`, and `5` use `ecall_time_ms`, `ptime_ms`,
+Modes `1`, `3`, `4`, `5`, and `7` use `ecall_time_ms`, `ptime_ms`,
 `gen_perm_offline_ms`, and `apply_perm_online_ms` in their CSV headers.
 Their final column is `algorithm_heap_peak_mib` instead of `heap_est_mb`.
 
@@ -262,7 +269,7 @@ Where:
 
 - `heap_est_mb` is the estimated heap size (MB) used to patch `Enclave.config.xml`
     before each run, retained in the CSV only for modes 10/11/12/13.
-- `algorithm_heap_peak_mib` (modes 1/2/3/4/5) is the maximum simultaneous live
+- `algorithm_heap_peak_mib` (modes 1/2/3/4/5/6/7) is the maximum simultaneous live
     requested heap bytes across successful **measured** rounds, divided by
     1,048,576. Each round spans decryption, offline and online execution,
     encryption, and cleanup. Warmup peaks are excluded; persistent scratch

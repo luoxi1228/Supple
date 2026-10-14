@@ -140,6 +140,7 @@ Enclave_Cpp_Files := Enclave/Enclave.cpp Enclave/utils.cpp Enclave/ThreadPool.cp
 		Enclave/Baseline/Shuffle_based/ShuffleBasedSWO.cpp \
 		Enclave/Baseline/Compaction_based/CompactionBasedSWO.cpp \
 		Enclave/SubSample_v2/FFOS_C/FFOS_C.cpp Enclave/SubSample_v2/FFOS_C/helper.cpp \
+		Enclave/SubSample_v2/FFOS_C_Opt/FFOS_C_Opt.cpp \
 		Enclave/SubSample_v2/OFR/OFR.cpp Enclave/SubSample_v2/OFR/helper.cpp Enclave/SubSample_v2/OFR/OFRBenchmark.cpp \
 		Enclave/SubSample_v2/FFOS_FR/FFOS_FR.cpp \
 		Enclave/SubSample_v2/FFOS_FR_Par/FFOS_FR_Par.cpp \
@@ -249,6 +250,7 @@ endif
 ######## App Objects ########
 
 FFOS_Edl_Files := Enclave/SubSample_v2/FFOS_C/FFOS_C.edl \
+                  Enclave/SubSample_v2/FFOS_C_Opt/FFOS_C_Opt.edl \
                   Enclave/SubSample_v2/FFOS_FR/FFOS_FR.edl \
                   Enclave/SubSample_v2/FFOS_FR_Par/FFOS_FR_Par.edl
 
@@ -297,6 +299,7 @@ Enclave/Baseline/Compaction_based/CompactionBasedSWO.o: Enclave/Baseline/Compact
 Enclave/ObliviousPrimitives.o: Enclave/ORCompaction/TightCompaction_v2.hpp Enclave/ORCompaction/TightCompaction_v2.tcc
 Enclave/SubSample_v2/FFOS_FR/FFOS_FR.o: Enclave/SubSample_v2/FFOS_FR/FFOS_FR.hpp Enclave/SubSample_v2/OFR/OFR.hpp
 Enclave/SubSample_v2/FFOS_FR_Par/FFOS_FR_Par.o: Enclave/SubSample_v2/FFOS_FR_Par/FFOS_FR_Par.hpp Enclave/SubSample_v2/FFOS_FR/FFOS_FR.hpp
+Enclave/SubSample_v2/FFOS_C_Opt/FFOS_C_Opt.o: Enclave/SubSample_v2/FFOS_C_Opt/FFOS_C_Opt.hpp Enclave/SubSample_v2/FFOS_C/helper.hpp Enclave/SubSample_v2/FFOS_C/FFOS_C.hpp Enclave/SubSample_v2/OnlineProfile.hpp Enclave/SubSample_v2/OfflineProfile.hpp
 Enclave/SubSample_v2/OFR/OFR.o: Enclave/SubSample_v2/OFR/OFR.hpp Enclave/SubSample_v2/OFR/FourGateSSE2.hpp Enclave/oasm_lib.tcc
 
 Enclave/asm/%.s: Enclave/%.cpp $(Enclave_Asm_Objects)

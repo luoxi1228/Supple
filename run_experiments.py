@@ -17,12 +17,12 @@ ENCLAVE_CONFIG = PROJECT_DIR / "Enclave" / "Enclave.config.xml"
 DEFAULT_RESULTS_FOLDER = "RESULTS"
 
 
-DEFAULT_MODE = [5,6]
+DEFAULT_MODE = [7]
 DEFAULT_P = [0.015625]
-DEFAULT_N = [1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456]
+DEFAULT_N = [1048576]
 DEFAULT_K = [64]
 DEFAULT_K_SELECT = 2   # 1 => k = 1/p, 2 => use --k list
-DEFAULT_BLOCK_SIZE = [16]
+DEFAULT_BLOCK_SIZE = [128]
 DEFAULT_REPEAT = 3
 DEFAULT_WARMUP = 1
 DEFAULT_THREADS = [4]   # ["auto"] => auto; [4] or [1, 2, 4] => manual budgets (mode 6 only)
@@ -38,6 +38,7 @@ MODE_INFO = {
   4: {"name": "FFOS_C", "needs_k": True, "detailed": True, "fixed_k": False},
   5: {"name": "FFOS_FR", "needs_k": True, "detailed": True, "fixed_k": False},
   6: {"name": "FFOS_FR_Par", "needs_k": True, "detailed": True, "fixed_k": False},
+  7: {"name": "FFOS_C_Opt", "needs_k": True, "detailed": True, "fixed_k": False},
 
   10: {"name": "PSQF_single", "needs_k": False, "detailed": False, "fixed_k": True},
   11: {"name": "SubSample", "needs_k": False, "detailed": False, "fixed_k": True},
@@ -45,7 +46,7 @@ MODE_INFO = {
   13: {"name": "SubSampleMulti_opt", "needs_k": True, "detailed": True, "fixed_k": False},
 }
 
-CSV_HEADER_MODES = {1, 2, 3, 4, 5, 6}
+CSV_HEADER_MODES = {1, 2, 3, 4, 5, 6, 7}
 CSV_COMMON_FIELDS = ("block_size", "p", "n", "k", "ecall_time_ms", "ptime_ms")
 CSV_DETAILED_FIELDS = ("gen_perm_offline_ms", "apply_perm_online_ms")
 CSV_TRAILING_FIELDS = ("oswaps", "heap_est_mb")
@@ -82,9 +83,9 @@ def parse_args():
   parser.add_argument("--modes", default=",".join(map(str, DEFAULT_MODE)), help="Comma-separated modes, e.g. 3,4")
   parser.add_argument("--n", default=",".join(map(str, DEFAULT_N)), help="Comma-separated N values")
   parser.add_argument("--p", default=",".join(map(str, DEFAULT_P)), help="Comma-separated P values (0 < P <= 1)")
-  parser.add_argument("--k", default=",".join(map(str, DEFAULT_K)), help="Comma-separated K values (used by modes 1/2/3/4/5/6/12/13)")
+  parser.add_argument("--k", default=",".join(map(str, DEFAULT_K)), help="Comma-separated K values (used by modes 1/2/3/4/5/6/7/12/13)")
   parser.add_argument("--k-select", type=int, choices=[1, 2], default=DEFAULT_K_SELECT,
-                      help="Modes 1/2/3/4/5/6/12/13 K selection: 1 => k=1/p, 2 => use --k list")
+                      help="Modes 1/2/3/4/5/6/7/12/13 K selection: 1 => k=1/p, 2 => use --k list")
   parser.add_argument("--block-sizes", default=",".join(map(str, DEFAULT_BLOCK_SIZE)), help="Comma-separated block sizes")
   parser.add_argument(
     "--repeat", type=int, default=DEFAULT_REPEAT,
@@ -97,10 +98,10 @@ def parse_args():
   offline_group = parser.add_mutually_exclusive_group()
   offline_group.add_argument("--offline-profile", dest="offline_profile",
                              action="store_true",
-                             help="Collect offline phase timings and enclave heap high-water marks for modes 4, 5 and 6 (adds timing overhead)")
+                             help="Collect offline phase timings and enclave heap high-water marks for modes 4, 5, 6 and 7 (adds timing overhead)")
   offline_group.add_argument("--no-offline-profile", dest="offline_profile",
                              action="store_false",
-                             help="Skip offline profiling for modes 4, 5 and 6")
+                             help="Skip offline profiling for modes 4, 5, 6 and 7")
   parser.add_argument("--threads", default=",".join(map(str, DEFAULT_THREADS)),
                       help="auto or comma-separated positive thread budgets for mode 6")
   parser.set_defaults(offline_profile=False)
@@ -311,6 +312,52 @@ def align_page(value):
   return int(math.ceil(float(value) / 4096.0) * 4096)
 
 
+def ffos_c_opt_sizes(n, m, k):
+  """Public-shape bounds for C's packed tape, projections and shared backup."""
+  roots = (ffos_fr_frontier(n, m, k) if m * k > n else
+           ((0, 1),) if k == 1 else ((0, k // 2), (k // 2, k - k // 2)))
+  bits = 0
+  nodes = 0
+  def edge(items, count):
+    nonlocal bits, nodes
+    nodes += 1
+    child = m * count
+    if child < items:
+      bits += items
+    if count > 1:
+      left = count // 2
+      edge(child, left)
+      edge(child, count - left)
+  for _, count in roots:
+    edge(n, count)
+  levels = {}
+  backup_words = 0
+  def pair(items, count, depth):
+    nonlocal backup_words
+    if count <= 1:
+      return
+    backup_words = max(backup_words, items * ((count + WORD_BITS - 1) // WORD_BITS))
+    left = count // 2
+    right = count - left
+    cap = levels.setdefault(depth, [0, 0])
+    for side, child in enumerate((left, right)):
+      if child > 1:
+        cap[side] = max(cap[side], m * child * ((child + WORD_BITS - 1) // WORD_BITS))
+      pair(m * child, child, depth + 1)
+  exact = m * k == n and k > 1
+  child_words = 0
+  if exact:
+    pair(n, k, 0)
+  else:
+    for _, count in roots:
+      if count > 1 or m * count < n:
+        child_words = max(child_words, n * ((count + WORD_BITS - 1) // WORD_BITS))
+      pair(m * count, count, 1)
+  workspace = (backup_words + child_words + sum(sum(v) for v in levels.values())) * SIZE_T_BYTES
+  plan = (nodes * 6 + len(roots)) * SIZE_T_BYTES + 512
+  return bits, workspace, plan
+
+
 def write_heap_config(heap_memory, tcs_num=1):
   with open(ENCLAVE_CONFIG, "r") as config_file:
     lines = config_file.readlines()
@@ -360,6 +407,17 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=0):
       64 * 1024
     )
     heap_memory = int(math.ceil(heap_memory * 1.25))
+
+  elif mode == 7:
+    k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
+    bits, workspace, plan = ffos_c_opt_sizes(n, m, k)
+    tape = (bits + 7) // 8
+    mark = n * ((k + WORD_BITS - 1) // WORD_BITS) * SIZE_T_BYTES
+    compact = n + 4 * (n + 1) if bits else 0
+    offline = mark + workspace + compact + tape + plan
+    online = m * k * block_size + (n * block_size if bits else 0) + compact + tape + plan
+    heap_memory += max(offline, online, mark + k * 8) + 64 * 1024
+    heap_memory = int(math.ceil(heap_memory * 1.35))
 
   elif mode in (5, 6):
     k = max(1, int(k_value if k_value is not None else int(1.0 / sample_prob)))
@@ -749,7 +807,7 @@ def main():
                 result += parallel
               results[(n, k_value)] = result
 
-              if args.offline_profile and mode in (4, 5, 6):
+              if args.offline_profile and mode in (4, 5, 6, 7):
                 # Run diagnostics separately so their clock OCALLs never enter
                 # the normal CSV's offline or online totals.
                 profile_env = env.copy()
@@ -785,7 +843,7 @@ def main():
             with open(csv_file_name, file_mode) as csv_file:
               for n, k_used in sorted(results.keys(), key=lambda item: (item[0], item[1])):
                 csv_file.write(format_csv_line(mode, block_size, p_rate, n, results[(n, k_used)]))
-          if args.offline_profile and mode in (4, 5, 6):
+          if args.offline_profile and mode in (4, 5, 6, 7):
             profile_file = results_folder / (mode_name + "_offline_profile.csv")
             profile_mode = "w" if args.overwrite and profile_file not in initialized_csv_files else "a"
             initialized_csv_files.add(profile_file)

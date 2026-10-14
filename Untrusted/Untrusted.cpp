@@ -493,6 +493,12 @@ void DecCompactionBasedSWO(unsigned char *encrypted_buffer, size_t N, size_t M, 
                        encrypted_result_buffer, ret);
 }
 
+void DecFFOS_C_Opt(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K,
+  size_t encrypted_block_size, unsigned char *encrypt_result_buffer, enc_ret *ret) {
+  DecFFOS_C_Opt(global_eid, encrypted_buffer, N, M, K, encrypted_block_size,
+                encrypt_result_buffer, ret);
+}
+
 
 void DecFFOS_FR(unsigned char *encrypted_buffer, size_t N, size_t M, size_t K, size_t encrypted_block_size,
   unsigned char *encrypt_result_buffer, enc_ret *ret) {

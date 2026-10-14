@@ -47,6 +47,7 @@ static double Run(Enclave &enclave, int mode, size_t n, size_t m, size_t k,
   sgx_status_t status = SGX_ERROR_UNEXPECTED;
   switch (mode) {
     case 2: status = DecPSQF_SWO(enclave.id, input.data(), n, m, encrypted_width, output.data(), &ret); break;
+    case 7: status = DecFFOS_C_Opt(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
     case 4: status = DecFFOS_C(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
     case 5: status = DecFFOS_FR(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), &ret); break;
     case 6: status = DecFFOS_FR_Par(enclave.id, input.data(), n, m, k, encrypted_width, output.data(), threads, &ret); break;
@@ -94,7 +95,7 @@ int main(int argc, char **argv) {
   std::setbuf(stdout, nullptr);
   if (bench) {
     std::puts("mode,trial,tracking,round,ecall_ms,ptime_ms,peak_bytes");
-    for (int mode : {1, 2, 3, 4, 5, 6}) {
+    for (int mode : {1, 2, 3, 4, 5, 6, 7}) {
       for (int trial = 0; trial < 5; ++trial) {
         for (int setting = 0; setting < (compare ? 3 : baseline ? 1 : 2); ++setting) {
           // For the three-build comparison, rotate -1=unwrapped, 0=disabled,
@@ -115,7 +116,7 @@ int main(int argc, char **argv) {
     }
     return 0;
   }
-  for (int mode : {1, 2, 3, 4, 5, 6}) {
+  for (int mode : {1, 2, 3, 4, 5, 6, 7}) {
     for (size_t k : {size_t(1), size_t(2), size_t(4), size_t(8)}) {
       Enclave enclave(argv[1]);
       size_t first_peak = 0;
@@ -126,7 +127,7 @@ int main(int argc, char **argv) {
         // TCSPolicy=1 resets TLS on every root ECALL. Selection scratch must
         // be released by its owner rather than leaking a fresh bool[N] each
         // round, including FFOS_FR's compaction paths.
-        if (mode == 4 || mode == 5 || mode == 6) {
+        if (mode == 4 || mode == 5 || mode == 6 || mode == 7) {
           if (round == 0) first_peak = peak;
           assert(peak == first_peak);
         }
@@ -145,6 +146,7 @@ int main(int argc, char **argv) {
     unsigned char buffer[64]{};
     switch (mode) {
       case 2: DecPSQF_SWO(enclave.id, buffer, 0, 0, 52, buffer, &bad); break;
+      case 7: DecFFOS_C_Opt(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
       case 4: DecFFOS_C(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
       case 5: DecFFOS_FR(enclave.id, buffer, 0, 0, 1, 52, buffer, &bad); break;
       case 6: DecFFOS_FR_Par(enclave.id, buffer, 0, 0, 1, 52, buffer, 1, &bad); break;
@@ -157,6 +159,7 @@ int main(int argc, char **argv) {
     // A bad AES-GCM tag is an algorithm failure, not a successful measurement.
     switch (mode) {
       case 2: DecPSQF_SWO(enclave.id, buffer, 1, 1, 52, buffer, &bad); break;
+      case 7: DecFFOS_C_Opt(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
       case 4: DecFFOS_C(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
       case 5: DecFFOS_FR(enclave.id, buffer, 1, 1, 1, 52, buffer, &bad); break;
       case 6: DecFFOS_FR_Par(enclave.id, buffer, 1, 1, 1, 52, buffer, 1, &bad); break;
@@ -188,6 +191,37 @@ int main(int argc, char **argv) {
           Run(enclave,6,8192,128,k,width,true,&peak,&ptime,threads);
       }
   }
+  // Mode 7 covers output-slice routing, odd shapes and multi-word membership
+  // through real authentication and interleaved ECALL/TLS lifetimes.
+  for (size_t width : {4, 8, 12, 16, 24, 64, 256}) {
+    Enclave enclave(argv[1]);
+    size_t peak=0, first=0;
+    double ptime=0;
+    for (int round=0;round<3;++round) {
+      Run(enclave,7,128,2,64,width,true,&peak,&ptime);
+      if (!round) first=peak;
+      assert(peak==first);
+      Run(enclave,5,65,1,129,width,true,&peak,&ptime);
+    }
+    Run(enclave,7,65,1,129,width,true,&peak,&ptime);
+    Run(enclave,7,127,3,65,width,true,&peak,&ptime);
+    Run(enclave,7,1,1,3,width,true,&peak,&ptime);
+    Run(enclave,7,65,65,2,width,true,&peak,&ptime);
+  }
+  for (int failure=0;failure<3;++failure) {
+    Enclave enclave(argv[1]);
+    unsigned char input[44]{}, output[44]{}, record[16]{};
+    assert(gcm_encrypt(record,16,nullptr,0,enclave.input_key,input,12,
+                       input+12,input+28)==16);
+    enc_ret ret{};
+    ret.collect_memory_profile=1;
+    const size_t n=failure==0 ? size_t(UINT32_MAX)+1 : 1;
+    const size_t k=failure==1 ? SIZE_MAX : failure==2 ? size_t(1)<<28 : 1;
+    assert(DecFFOS_C_Opt(enclave.id,input,n,1,k,44,output,&ret)==SGX_SUCCESS);
+    assert(ret.memory_profile_status==MEMORY_PROFILE_INVALID);
+    for (unsigned char byte:output) assert(byte==0);
+  }
+  std::puts("PASS: optimized C shapes, interleaving, overflow and allocation failure");
   // Specialized and generic compaction dispatch widths, tiny inputs and
   // both extreme sample sizes. Use fresh enclaves after failures.
   for (size_t width : {4, 8, 12, 16, 24, 32, 40, 64}) {

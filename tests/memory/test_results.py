@@ -19,7 +19,7 @@ spec.loader.exec_module(experiments)
 class MemoryResultsTest(unittest.TestCase):
     def test_ffos_result_and_profile_filenames(self):
         with tempfile.TemporaryDirectory() as directory:
-            args = SimpleNamespace(modes="4,5,6", n="64", p=".25", k="2",
+            args = SimpleNamespace(modes="4,5,6,7", n="64", p=".25", k="2",
                                    block_sizes="24", repeat=1, warmup=0,
                                    k_select=2, results_folder=directory,
                                    overwrite=False, offline_profile=True)
@@ -38,8 +38,9 @@ class MemoryResultsTest(unittest.TestCase):
             self.assertEqual({path.name for path in Path(directory).iterdir()}, {
                 "FFOS_C.csv", "FFOS_FR.csv", "FFOS_FR_Par.csv",
                 "FFOS_C_offline_profile.csv", "FFOS_FR_offline_profile.csv",
-                "FFOS_FR_Par_offline_profile.csv"})
-            for name in ("FFOS_C", "FFOS_FR", "FFOS_FR_Par"):
+                "FFOS_FR_Par_offline_profile.csv", "FFOS_C_Opt.csv",
+                "FFOS_C_Opt_offline_profile.csv"})
+            for name in ("FFOS_C", "FFOS_FR", "FFOS_FR_Par", "FFOS_C_Opt"):
                 rows = (Path(directory) / (name + "_offline_profile.csv")).read_text().splitlines()
                 self.assertEqual(len(rows), 2)
                 self.assertIn("total_heap_peak_bytes", rows[0])
@@ -62,6 +63,7 @@ class MemoryResultsTest(unittest.TestCase):
             4: ("FFOS_C", True, True, False, 2215936, 1),
             5: ("FFOS_FR", True, True, False, 2146304, 1),
             6: ("FFOS_FR_Par", True, True, False, 2240512, 1),
+            7: ("FFOS_C_Opt", True, True, False, 0, 1),
             10: ("PSQF_single", False, False, True, 1187840, 1),
             11: ("SubSample", False, False, True, 1187840, 1),
             12: ("SubSampleMultiSlice", True, True, False, 1998848, 1),
@@ -75,9 +77,13 @@ class MemoryResultsTest(unittest.TestCase):
             self.assertEqual(experiments.MODE_INFO[mode], dict(
                 name=name, needs_k=needs_k, detailed=detailed, fixed_k=fixed_k))
             with mock.patch.object(experiments, "available_cpus", return_value=1), mock.patch.object(experiments, "write_heap_config") as config:
-                self.assertEqual(experiments.estimate_heap(
-                    mode, 4096, 16, .015625, k_value=128), heap)
-                config.assert_called_once_with(heap, tcs)
+                actual = experiments.estimate_heap(mode, 4096, 16, .015625, k_value=128)
+                if mode == 7:
+                    self.assertGreater(actual, 4096 * 16 + 64 * 128 * 16)
+                    self.assertEqual(actual % 4096, 0)
+                else:
+                    self.assertEqual(actual, heap)
+                config.assert_called_once_with(actual, tcs)
             expected_command = ["./application", str(mode), "64", "24", "0.25"]
             if needs_k:
                 expected_command.append("2")
@@ -85,7 +91,7 @@ class MemoryResultsTest(unittest.TestCase):
             self.assertEqual(experiments.build_command(mode, 64, 24, .25, 2, 1, 0), expected_command)
             self.assertEqual(experiments.k_candidates_for(mode, .25, [2, 8], 2),
                              [1] if fixed_k else [2, 8] if needs_k or mode == 2 else [4])
-        for mode in (0, 7, 8, 9, 14, 15):
+        for mode in (0, 8, 9, 14, 15):
             with self.assertRaises(SystemExit):
                 experiments.normalize_modes([mode])
 
@@ -213,7 +219,7 @@ class MemoryResultsTest(unittest.TestCase):
 
     def test_main_uses_measured_peak_and_rejects_missing_peak(self):
         with tempfile.TemporaryDirectory() as directory:
-            args = SimpleNamespace(modes="1,2,3,4,5,6", n="64", p=".25", k="2",
+            args = SimpleNamespace(modes="1,2,3,4,5,6,7", n="64", p=".25", k="2",
                                    block_sizes="24", repeat=2, warmup=2,
                                    k_select=2, results_folder=directory,
                                    overwrite=False, offline_profile=False)
@@ -227,7 +233,7 @@ class MemoryResultsTest(unittest.TestCase):
                  mock.patch.object(experiments, "estimate_heap", return_value=64 * 1048576), \
                  mock.patch.object(experiments.subprocess, "run", side_effect=process):
                 self.assertEqual(experiments.main(), 0)
-            for mode in (2, 4, 5, 6, 1, 3):
+            for mode in (2, 4, 5, 6, 7, 1, 3):
                 path = Path(directory) / (experiments.MODE_INFO[mode]["name"] + ".csv")
                 self.assertEqual(list(csv.DictReader(io.StringIO(path.read_text())))[-1]["algorithm_heap_peak_mib"], "1.0")
             args.results_folder = str(Path(directory) / "failed")
@@ -239,7 +245,7 @@ class MemoryResultsTest(unittest.TestCase):
             self.assertEqual(list(Path(args.results_folder).glob("*.csv")), [])
 
     def test_output_protocol(self):
-        for mode in (2, 4, 5, 6, 1, 3):
+        for mode in (2, 4, 5, 6, 7, 1, 3):
             timings = "1\n2\n3\n4\n5\n" if mode != 2 else "1\n2\n5\n"
             output = timings + "MEMORY,1048576\nPROFILE,1,2,3\nOFFLINE_PROFILE,0\n"
             parsed = experiments.parse_output(mode, output)
@@ -255,7 +261,7 @@ class MemoryResultsTest(unittest.TestCase):
 
     def test_archive_estimates_without_relabeling(self):
         with tempfile.TemporaryDirectory() as directory:
-            for mode in (2, 4, 5, 6, 1, 3):
+            for mode in (2, 4, 5, 6, 7, 1, 3):
                 path = Path(directory) / f"mode{mode}.csv"
                 header = experiments.result_csv_header(mode)
                 row = "16,.5,16,2," + ("1,2,3,4,5,6,0,8,1\n" if mode == 6 else "1,2,3,4,5,6\n" if mode != 2 else "1,2,5,6\n")

@@ -16,6 +16,7 @@ static void ocall_clock(long *t) {
 #include "../../Enclave/SubSample_v2/FFOS_C/FFOS_C.cpp"
 #include "../../Enclave/SubSample_v2/FFOS_FR/FFOS_FR.cpp"
 #include "../../Enclave/SubSample_v2/FFOS_FR_Par/FFOS_FR_Par.cpp"
+#include "../../Enclave/SubSample_v2/FFOS_C_Opt/FFOS_C_Opt.cpp"
 #endif
 #include <string>
 
@@ -37,10 +38,10 @@ namespace {
 #ifdef FFOS_LEGACY_SOURCE
 constexpr size_t kMethodCount = 2;
 #else
-constexpr size_t kMethodCount = 3;
+constexpr size_t kMethodCount = 4;
 #endif
 const char *MethodName(size_t method) {
-  static const char *names[] = {"FFOS_C", "FFOS_FR", "FFOS_FR_Par"};
+  static const char *names[] = {"FFOS_C", "FFOS_FR", "FFOS_FR_Par", "FFOS_C_Opt"};
   return names[method];
 }
 volatile size_t benchmark_sink = 0;
@@ -76,6 +77,20 @@ Result Measure(size_t method, const std::vector<size_t> &membership,
   ret.collect_memory_profile = memory;
   {
     memory_profile::Scope scope(&ret);
+#ifndef FFOS_LEGACY_SOURCE
+    if (method == 3) {
+      FFOS_C_OptControls controls;
+      result.control = TimeMs([&] {
+        controls = FFOS_C_OptControl(membership, frontier, n, m, k,
+                                    profile ? &result.phases : nullptr);
+      });
+      result.tape_bytes = controls.bits.size();
+      result.apply = TimeMs([&] {
+        const auto output = FFOS_C_OptApply(data.data(), controls, n, m, k, width);
+        benchmark_sink ^= output[output.size()/3];
+      });
+    } else
+#endif
     if (method != 0) {
       FFOS_FRControls controls;
 #ifndef FFOS_LEGACY_SOURCE

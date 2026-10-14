@@ -101,7 +101,7 @@ def main():
         if name not in wanted:
             continue
         for trial in range(args.trials):
-            for mode in ((4, 5, 6) if trial % 2 == 0 else (6, 5, 4)):
+            for mode in ((4, 5, 6, 7) if trial % 2 == 0 else (7, 6, 5, 4)):
                 command = (str(application), str(mode), str(n), str(width),
                            str(m / n), str(k), str(args.repeat), str(args.warmup))
                 run = subprocess.run(command, cwd=application.parent, env=env,
