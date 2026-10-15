@@ -1,5 +1,21 @@
 # Algorithm heap peak regression tests
 
+Modes 4/5/6/7 additionally record Offline Peak Memory and Online Peak Memory
+in their normal CSVs (`offline_heap_peak_mib`, `online_heap_peak_mib`). Offline
+tracks allocation ownership during control generation, excluding decrypted
+input; online tracks live payload, retained controls and data-movement buffers
+from output allocation to the end of control application. The whole-ECALL
+peak remains separate. AES decryption/encryption are outside the online phase.
+All metrics exclude heap fragmentation, allocator metadata and stacks.
+
+The tracker tests cover independent phase peaks, retained control allocations,
+moving realloc overlap, freeing preexisting input during offline, exclusion of
+later encryption allocations, parallel allocations, repeated rounds and
+incomplete measurements. Adapter and SGX tests require offline peaks to stay
+constant when payload width changes while online peaks increase. CSV tests
+cover phase validation, exact unit conversion, mode 6 column placement and
+preservation of older measured rows with empty historical phase cells.
+
 Run `bash tests/memory/run_tests.sh` for exact-byte tracker tests and CSV
 parsing/migration tests. Allocator adapters let the tests force failed and
 moving reallocations; explicit host new/delete adapters exercise STL buffer

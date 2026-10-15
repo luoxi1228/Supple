@@ -57,6 +57,12 @@ def main(build):
                 assert len(rows) == 1
                 peak = experiments.parse_memory_peak(outputs[mode])
                 assert float(rows[0]["algorithm_heap_peak_mib"]) == peak / 1048576
+                if mode in experiments.CONTROL_MEMORY_MODES:
+                    offline = experiments.parse_offline_memory_peak(outputs[mode])
+                    online = experiments.parse_online_memory_peak(outputs[mode])
+                    assert 0 < offline <= peak and 0 < online <= peak
+                    assert float(rows[0]["offline_heap_peak_mib"]) == offline / 1048576
+                    assert float(rows[0]["online_heap_peak_mib"]) == online / 1048576
                 # Old estimated data must be archived, not appended or relabeled.
                 old = path.read_text().replace("algorithm_heap_peak_mib", "heap_est_mb")
                 path.write_text(old)
@@ -101,6 +107,12 @@ def main(build):
                 assert experiments.parse_memory_peak(result.stdout) > 0
             else:
                 assert experiments.parse_memory_peak(result.stdout) is None
+            if mode in experiments.CONTROL_MEMORY_MODES:
+                assert experiments.parse_offline_memory_peak(result.stdout) > 0
+                assert experiments.parse_online_memory_peak(result.stdout) > 0
+            else:
+                assert experiments.parse_offline_memory_peak(result.stdout) is None
+                assert experiments.parse_online_memory_peak(result.stdout) is None
         for mode in (8, 9, 14):
             command = [str(build / "application"), str(mode), "64", "24", ".25", "1", "0"]
             result = run(command, cwd=build, env=env, capture_output=True, text=True)

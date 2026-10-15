@@ -23,7 +23,7 @@ class MemoryResultsTest(unittest.TestCase):
                                    block_sizes="24", repeat=1, warmup=0,
                                    k_select=2, results_folder=directory,
                                    overwrite=False, offline_profile=True)
-            output = ("1\n2\n3\n4\n5\nMEMORY,1048576\nPARALLEL,0,8,1\nOFFLINE_PROFILE," +
+            output = ("1\n2\n3\n4\n5\nMEMORY,1048576\nOFFLINE_MEMORY,524288\nONLINE_MEMORY,786432\nPARALLEL,0,8,1\nOFFLINE_PROFILE," +
                       ",".join(["0"] * 12) + "\n")
             def process(command, **kwargs):
                 result = output
@@ -94,6 +94,21 @@ class MemoryResultsTest(unittest.TestCase):
         for mode in (0, 8, 9, 14, 15):
             with self.assertRaises(SystemExit):
                 experiments.normalize_modes([mode])
+
+    def test_ffos_c_opt_heap_covers_fragmented_output_allocation(self):
+        # At N=2^20, M=2^14, B=16, the layout retains 16 MiB of input,
+        # a 256/512 MiB freed membership hole below live controls, 48/96 MiB
+        # of tape, and needs a contiguous 512/1024 MiB plaintext output.
+        # These layout floors exclude allocator overhead and other scratch.
+        # The old live-peak estimate (829/1585 MiB) falls below both floors.
+        for k, minimum_mib in ((2048, 832), (4096, 1648)):
+            with self.subTest(k=k), \
+                 mock.patch.object(experiments, "available_cpus", return_value=1), \
+                 mock.patch.object(experiments, "write_heap_config") as config:
+                heap = experiments.estimate_heap(7, 1048576, 16, .015625, k_value=k)
+                self.assertGreater(heap, minimum_mib * 1048576)
+                self.assertEqual(heap % 4096, 0)
+                config.assert_called_once_with(heap, 1)
 
     def run_psqf(self, p, k, *, n=1048576, k_select=2, failure=None):
         commands = []
@@ -228,7 +243,8 @@ class MemoryResultsTest(unittest.TestCase):
                     return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
                 mode = int(command[1])
                 numbers = "1\n2\n5\n" if mode == 2 else "1\n2\n3\n4\n5\n"
-                return SimpleNamespace(returncode=0, stdout=(numbers + "MEMORY,1048576\nPARALLEL,0,8,1\n").encode(), stderr=b"")
+                phases = "OFFLINE_MEMORY,524288\nONLINE_MEMORY,786432\n" if mode in experiments.CONTROL_MEMORY_MODES else ""
+                return SimpleNamespace(returncode=0, stdout=(numbers + "MEMORY,1048576\n" + phases + "PARALLEL,0,8,1\n").encode(), stderr=b"")
             with mock.patch.object(experiments, "parse_args", return_value=args), \
                  mock.patch.object(experiments, "estimate_heap", return_value=64 * 1048576), \
                  mock.patch.object(experiments.subprocess, "run", side_effect=process):
@@ -236,6 +252,13 @@ class MemoryResultsTest(unittest.TestCase):
             for mode in (2, 4, 5, 6, 7, 1, 3):
                 path = Path(directory) / (experiments.MODE_INFO[mode]["name"] + ".csv")
                 self.assertEqual(list(csv.DictReader(io.StringIO(path.read_text())))[-1]["algorithm_heap_peak_mib"], "1.0")
+                row = list(csv.DictReader(io.StringIO(path.read_text())))[-1]
+                if mode in experiments.CONTROL_MEMORY_MODES:
+                    self.assertEqual(row["offline_heap_peak_mib"], "0.5")
+                    self.assertEqual(row["online_heap_peak_mib"], "0.75")
+                else:
+                    self.assertNotIn("offline_heap_peak_mib", row)
+                    self.assertNotIn("online_heap_peak_mib", row)
             args.results_folder = str(Path(directory) / "failed")
             failure = SimpleNamespace(returncode=0, stdout=b"1\n2\n3\n4\n5\n", stderr=b"")
             with mock.patch.object(experiments, "parse_args", return_value=args), \
@@ -247,17 +270,53 @@ class MemoryResultsTest(unittest.TestCase):
     def test_output_protocol(self):
         for mode in (2, 4, 5, 6, 7, 1, 3):
             timings = "1\n2\n3\n4\n5\n" if mode != 2 else "1\n2\n5\n"
-            output = timings + "MEMORY,1048576\nPROFILE,1,2,3\nOFFLINE_PROFILE,0\n"
+            output = timings + "MEMORY,1048576\nOFFLINE_MEMORY,524288\nONLINE_MEMORY,786432\nPROFILE,1,2,3\nOFFLINE_PROFILE,0\n"
             parsed = experiments.parse_output(mode, output)
             self.assertIsNotNone(parsed)
             self.assertEqual(experiments.parse_memory_peak(output), 1048576)
-            result = experiments.make_result(mode, 2, parsed, 1048576 / 1048576)
-            self.assertEqual(experiments.format_csv_line(mode, 16, .5, 16, result).split(",")[-1], "1.0\n")
+            self.assertEqual(experiments.parse_offline_memory_peak(output), 524288)
+            self.assertEqual(experiments.parse_online_memory_peak(output), 786432)
+            result = experiments.make_result(mode, 2, parsed, 1.0, .5, .75)
+            if mode == 6:
+                result += (0, 8, 1)
+            header = experiments.result_csv_header(mode).strip().split(",")
+            values = experiments.format_csv_line(mode, 16, .5, 16, result).strip().split(",")
+            self.assertEqual(len(values), len(header))
+            row = dict(zip(header, values))
+            self.assertEqual(row["algorithm_heap_peak_mib"], "1.0")
+            if mode in experiments.CONTROL_MEMORY_MODES:
+                self.assertEqual(row["offline_heap_peak_mib"], "0.5")
+                self.assertEqual(row["online_heap_peak_mib"], "0.75")
             self.assertIn("algorithm_heap_peak_mib", experiments.result_csv_header(mode))
         self.assertTrue(experiments.result_csv_header(13).endswith("heap_est_mb\n"))
         for output in ("", "MEMORY,-1", "MEMORY,1.5", "MEMORY,", "MEMORY,1,2",
                        "MEMORY,1\nMEMORY,2", "MEMORY,١"):
             self.assertIsNone(experiments.parse_memory_peak(output))
+            for prefix, parser in (("OFFLINE_MEMORY", experiments.parse_offline_memory_peak),
+                                   ("ONLINE_MEMORY", experiments.parse_online_memory_peak)):
+                self.assertIsNone(parser(output.replace("MEMORY", prefix)))
+
+    def test_reject_missing_invalid_or_inconsistent_phase_peaks(self):
+        for mode in (4, 5, 6, 7):
+            for phases in ("", "OFFLINE_MEMORY,1\n", "ONLINE_MEMORY,1\n",
+                           "OFFLINE_MEMORY,0\nONLINE_MEMORY,1\n",
+                           "OFFLINE_MEMORY,1\nONLINE_MEMORY,0\n",
+                           "OFFLINE_MEMORY,101\nONLINE_MEMORY,1\n",
+                           "OFFLINE_MEMORY,1\nONLINE_MEMORY,101\n",
+                           "OFFLINE_MEMORY,1\nOFFLINE_MEMORY,1\nONLINE_MEMORY,1\n",
+                           "OFFLINE_MEMORY,1\nONLINE_MEMORY,1\nONLINE_MEMORY,1\n"):
+                with self.subTest(mode=mode, phases=phases), tempfile.TemporaryDirectory() as directory:
+                    args = SimpleNamespace(modes=str(mode), n="64", p=".25", k="2",
+                                           block_sizes="24", repeat=1, warmup=0, k_select=2,
+                                           results_folder=directory, overwrite=False, offline_profile=False)
+                    failure = SimpleNamespace(returncode=0, stderr=b"", stdout=(
+                        "1\n2\n3\n4\n5\nMEMORY,100\nPARALLEL,0,8,1\n" + phases).encode())
+                    with mock.patch.object(experiments, "parse_args", return_value=args), \
+                         mock.patch.object(experiments, "estimate_heap", return_value=1048576), \
+                         mock.patch.object(experiments.subprocess, "run", return_value=failure), \
+                         contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(experiments.main(), 1)
+                    self.assertEqual(list(Path(directory).glob("*.csv")), [])
 
     def test_archive_estimates_without_relabeling(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -265,6 +324,8 @@ class MemoryResultsTest(unittest.TestCase):
                 path = Path(directory) / f"mode{mode}.csv"
                 header = experiments.result_csv_header(mode)
                 row = "16,.5,16,2," + ("1,2,3,4,5,6,0,8,1\n" if mode == 6 else "1,2,3,4,5,6\n" if mode != 2 else "1,2,5,6\n")
+                if mode in experiments.CONTROL_MEMORY_MODES:
+                    row = row.rstrip("\n") + ",3,4\n"
                 old_header = header.replace("algorithm_heap_peak_mib", "heap_est_mb")
                 for index, original in enumerate((row, old_header + row)):
                     path.write_text(original)
@@ -280,6 +341,68 @@ class MemoryResultsTest(unittest.TestCase):
                 self.assertEqual(path.read_text(), header + row + "\n")
                 experiments.prepare_result_csv(path, mode, True)
                 self.assertEqual(path.read_text(), header)
+
+    def test_add_phase_columns_preserves_measured_history_and_backups(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for mode in (4, 5, 6, 7):
+                path = Path(directory) / f"mode{mode}.csv"
+                header = experiments.result_csv_header(mode)
+                old_header = header.replace(",offline_heap_peak_mib,online_heap_peak_mib", "")
+                row = "16,.5,16,2,1,2,3,4,5,6" + (",0,8,1" if mode == 6 else "")
+                original = (old_header + row + "\n\n" + row + "\n").replace("\n", "\r\n").encode()
+                for index in range(2):
+                    path.write_bytes(original)
+                    experiments.prepare_result_csv(path, mode, False)
+                    suffix = f".{index}" if index else ""
+                    backup = path.with_name(f"mode{mode}.phase_memory_backup{suffix}.csv")
+                    self.assertEqual(backup.read_bytes(), original)
+                    rows = list(csv.DictReader(io.StringIO(path.read_text())))
+                    self.assertEqual(len(rows), 2)
+                    for measured in rows:
+                        self.assertEqual(measured["algorithm_heap_peak_mib"], "6")
+                        self.assertEqual(measured["offline_heap_peak_mib"], "")
+                        self.assertEqual(measured["online_heap_peak_mib"], "")
+                        if mode == 6:
+                            self.assertEqual(measured["effective_threads"], "1")
+                    migrated = path.read_bytes()
+                    experiments.prepare_result_csv(path, mode, False)
+                    self.assertEqual(path.read_bytes(), migrated)
+                # Existing columns retain their positions; phase fields append.
+                self.assertEqual(header.split(",")[:-2], old_header.strip().split(","))
+
+    def test_malformed_measured_history_is_not_rewritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.csv"
+            old_header = experiments.result_csv_header(7).replace(",offline_heap_peak_mib,online_heap_peak_mib", "")
+            original = old_header + "16,.5,16\n"
+            path.write_text(original)
+            with self.assertRaises(ValueError):
+                experiments.prepare_result_csv(path, 7, False)
+            self.assertEqual(path.read_text(), original)
+            self.assertEqual(list(Path(directory).glob("*backup*")), [])
+
+    def test_phase_migration_preserves_comments_and_whitespace(self):
+        for mode in (4, 5, 6, 7):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "results.csv"
+                header = experiments.result_csv_header(mode)
+                old_header = header.replace(",offline_heap_peak_mib,online_heap_peak_mib", "")
+                row = "16,.5,16,2,1,2,3,4,5,6" + (",0,8,1" if mode == 6 else "")
+                original = (old_header + "# formal test\n" + row + "\n\n   \n"
+                            "  # another group, with a note\n" + row + "\n# end\n")
+                path.write_text(original)
+                experiments.prepare_result_csv(path, mode, False)
+                self.assertEqual((Path(directory) / "results.phase_memory_backup.csv").read_text(), original)
+                migrated = list(csv.reader(io.StringIO(path.read_text())))
+                self.assertEqual(migrated[0], header.strip().split(","))
+                self.assertEqual([r for r in migrated[1:] if not experiments.is_result_data_row(r)],
+                                 [["# formal test"], [], ["   "],
+                                  ["  # another group", " with a note"], ["# end"], []])
+                data = [r for r in migrated[1:] if experiments.is_result_data_row(r)]
+                self.assertEqual(data, [row.split(",") + ["", ""]] * 2)
+                before = path.read_bytes()
+                experiments.prepare_result_csv(path, mode, False)
+                self.assertEqual(path.read_bytes(), before)
 
     def test_unknown_header_is_preserved(self):
         with tempfile.TemporaryDirectory() as directory:

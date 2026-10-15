@@ -1,7 +1,9 @@
 #!/usr/bin/python3
 
 import argparse
+import csv
 from functools import lru_cache
+import io
 import math
 import os
 import shutil
@@ -20,10 +22,10 @@ DEFAULT_RESULTS_FOLDER = "RESULTS"
 DEFAULT_MODE = [7]
 DEFAULT_P = [0.015625]
 DEFAULT_N = [1048576]
-DEFAULT_K = [64]
+DEFAULT_K = [2048, 4096]
 DEFAULT_K_SELECT = 2   # 1 => k = 1/p, 2 => use --k list
-DEFAULT_BLOCK_SIZE = [128]
-DEFAULT_REPEAT = 3
+DEFAULT_BLOCK_SIZE = [16]
+DEFAULT_REPEAT = 2
 DEFAULT_WARMUP = 1
 DEFAULT_THREADS = [4]   # ["auto"] => auto; [4] or [1, 2, 4] => manual budgets (mode 6 only)
 
@@ -47,6 +49,8 @@ MODE_INFO = {
 }
 
 CSV_HEADER_MODES = {1, 2, 3, 4, 5, 6, 7}
+CONTROL_MEMORY_MODES = {4, 5, 6, 7}
+CSV_PHASE_MEMORY_FIELDS = ("offline_heap_peak_mib", "online_heap_peak_mib")
 CSV_COMMON_FIELDS = ("block_size", "p", "n", "k", "ecall_time_ms", "ptime_ms")
 CSV_DETAILED_FIELDS = ("gen_perm_offline_ms", "apply_perm_online_ms")
 CSV_TRAILING_FIELDS = ("oswaps", "heap_est_mb")
@@ -416,7 +420,10 @@ def estimate_heap(mode, n, block_size, sample_prob, k_value=None, threads=0):
     compact = n + 4 * (n + 1) if bits else 0
     offline = mark + workspace + compact + tape + plan
     online = m * k * block_size + (n * block_size if bits else 0) + compact + tape + plan
-    heap_memory += max(offline, online, mark + k * 8) + 64 * 1024
+    # Controls allocated after membership remain live when membership is freed.
+    # That hole cannot merge with the heap tail for the contiguous plaintext
+    # output allocation. Reserve it in the heap budget, not the measured peak.
+    heap_memory += max(offline, online + mark, mark + k * 8) + 64 * 1024
     heap_memory = int(math.ceil(heap_memory * 1.35))
 
   elif mode in (5, 6):
@@ -521,7 +528,7 @@ def resolve_results_folder(raw_path):
 
 def parse_output(mode, output):
   lines = [line.strip() for line in output.splitlines()
-           if line.strip() and not line.strip().startswith(("PROFILE,", "OFFLINE_PROFILE,", "MEMORY,", "PARALLEL,", "PAR_PROFILE,", "PAR_OFFLINE_PROFILE,"))]
+           if line.strip() and not line.strip().startswith(("PROFILE,", "OFFLINE_PROFILE,", "MEMORY,", "OFFLINE_MEMORY,", "ONLINE_MEMORY,", "PARALLEL,", "PAR_PROFILE,", "PAR_OFFLINE_PROFILE,"))]
   expected = 5 if MODE_INFO[mode]["detailed"] else 3
   if len(lines) < expected:
     return None
@@ -537,15 +544,23 @@ def parse_output(mode, output):
     return None
 
 
-def parse_memory_peak(output):
+def parse_memory_peak(output, prefix="MEMORY"):
   lines = [line.strip() for line in output.splitlines()
-           if line.strip().startswith("MEMORY,")]
+           if line.strip().startswith(prefix + ",")]
   if len(lines) != 1:
     return None
   fields = lines[0].split(",")
   if len(fields) != 2 or not fields[1].isascii() or not fields[1].isdigit():
     return None
   return int(fields[1])
+
+
+def parse_offline_memory_peak(output):
+  return parse_memory_peak(output, "OFFLINE_MEMORY")
+
+
+def parse_online_memory_peak(output):
+  return parse_memory_peak(output, "ONLINE_MEMORY")
 
 
 OFFLINE_PROFILE_FIELDS = (
@@ -585,24 +600,32 @@ def parse_offline_profile(output):
     return None
 
 
-def make_result(mode, k_value, parsed, heap_mb):
+def make_result(mode, k_value, parsed, heap_mb, offline_heap_mb=None, online_heap_mb=None):
   if MODE_INFO[mode]["detailed"]:
     ecall_time, ptime, gen_perm, apply_perm, oswaps = parsed
-    return (k_value, ecall_time, ptime, gen_perm, apply_perm, oswaps, heap_mb)
-  ecall_time, ptime, oswaps = parsed
-  return (k_value, ecall_time, ptime, oswaps, heap_mb)
+    result = (k_value, ecall_time, ptime, gen_perm, apply_perm, oswaps, heap_mb)
+  else:
+    ecall_time, ptime, oswaps = parsed
+    result = (k_value, ecall_time, ptime, oswaps, heap_mb)
+  if mode in CONTROL_MEMORY_MODES:
+    if offline_heap_mb is None or online_heap_mb is None:
+      raise ValueError("Missing offline/online heap measurement")
+    result += (offline_heap_mb, online_heap_mb)
+  return result
 
 
 def format_csv_line(mode, block_size, sample_prob, n, result):
-  parallel = result[-3:] if mode == 6 and len(result) == 10 else ()
+  parallel = result[-3:] if mode == 6 else ()
   result = result[:-3] if parallel else result
+  phases = result[-2:] if mode in CONTROL_MEMORY_MODES else ()
+  result = result[:-2] if phases else result
   if MODE_INFO[mode]["detailed"]:
     k_out, ecall_time, ptime, gen_perm, apply_perm, oswaps, heap_mb = result
     values = [block_size, sample_prob, n, k_out, ecall_time, ptime, gen_perm, apply_perm, oswaps, heap_mb]
   else:
     k_out, ecall_time, ptime, oswaps, heap_mb = result
     values = [block_size, sample_prob, n, k_out, ecall_time, ptime, oswaps, heap_mb]
-  return ",".join(str(value) for value in values + list(parallel)) + "\n"
+  return ",".join(str(value) for value in values + list(parallel) + list(phases)) + "\n"
 
 
 def result_csv_header(mode):
@@ -610,11 +633,43 @@ def result_csv_header(mode):
   if MODE_INFO[mode]["detailed"]:
     fields += CSV_DETAILED_FIELDS
   trailing = CSV_MEMORY_TRAILING_FIELDS if mode in CSV_HEADER_MODES else CSV_TRAILING_FIELDS
-  return ",".join(fields + trailing + (PAR_THREAD_FIELDS if mode == 6 else ())) + "\n"
+  return ",".join(fields + trailing + (PAR_THREAD_FIELDS if mode == 6 else ()) +
+                  (CSV_PHASE_MEMORY_FIELDS if mode in CONTROL_MEMORY_MODES else ())) + "\n"
+
+
+def archive_and_replace_csv(path, data, backup_kind):
+  # Hard-link reservation refuses collisions atomically. Replacement below
+  # leaves the original backup's bytes and permissions intact.
+  suffix = 0
+  while True:
+    number = f".{suffix}" if suffix else ""
+    backup = path.with_name(f"{path.stem}.{backup_kind}{number}{path.suffix}")
+    try:
+      os.link(path, backup)
+      break
+    except FileExistsError:
+      suffix += 1
+  temp_path = None
+  try:
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as updated:
+      temp_path = Path(updated.name)
+      updated.write(data)
+    shutil.copymode(path, temp_path)
+    os.replace(temp_path, path)
+  finally:
+    if temp_path is not None:
+      temp_path.unlink(missing_ok=True)
+  print(f"Backed up CSV: {backup}")
+
+
+def is_result_data_row(row):
+  """Result files may contain blank separators and # comment rows."""
+  return (any(field.strip() for field in row)
+          and not row[0].lstrip().startswith("#"))
 
 
 def prepare_result_csv(path, mode, overwrite):
-  """Append measured peaks; archive legacy estimates without relabeling them."""
+  """Preserve measured rows; leave unknown historical phase peaks blank."""
   header = result_csv_header(mode).encode("utf-8")
   if overwrite or not path.is_file() or path.stat().st_size == 0:
     path.write_bytes(header)
@@ -623,34 +678,33 @@ def prepare_result_csv(path, mode, overwrite):
   with path.open("rb") as existing:
     first_line = existing.readline()
   if first_line.rstrip(b"\r\n") != header.rstrip(b"\n"):
+    fields = header.rstrip(b"\n").split(b",")
+    previous_fields = [field for field in fields
+                       if field.decode("utf-8") not in CSV_PHASE_MEMORY_FIELDS]
+    previous_header = b",".join(previous_fields)
+    if mode in CONTROL_MEMORY_MODES and first_line.rstrip(b"\r\n") == previous_header:
+      with path.open(newline="") as existing:
+        rows = list(csv.reader(existing))[1:]
+      if any(is_result_data_row(row) and len(row) != len(previous_fields) for row in rows):
+        raise ValueError(f"CSV row does not match mode {mode}: {path}")
+      updated = io.StringIO(newline="")
+      writer = csv.writer(updated, lineterminator="\n")
+      writer.writerow([field.decode("utf-8") for field in fields])
+      for row in rows:
+        writer.writerow(row + [""] * len(CSV_PHASE_MEMORY_FIELDS)
+                        if is_result_data_row(row) else row)
+      if rows and rows[-1]:
+        writer.writerow([])
+      archive_and_replace_csv(path, updated.getvalue().encode("utf-8"), "phase_memory_backup")
+      return
     first_fields = first_line.rstrip(b"\r\n").split(b",")
-    legacy_header = header.rstrip(b"\n").replace(b"algorithm_heap_peak_mib", b"heap_est_mb")
-    headerless = (len(first_fields) == len(header.rstrip(b"\n").split(b","))
+    legacy_headers = {candidate.replace(b"algorithm_heap_peak_mib", b"heap_est_mb")
+                      for candidate in (header.rstrip(b"\n"), previous_header)}
+    headerless = (len(first_fields) in (len(fields), len(previous_fields))
                   and first_fields[0].isdigit())
-    if first_line.rstrip(b"\r\n") != legacy_header and not headerless:
+    if first_line.rstrip(b"\r\n") not in legacy_headers and not headerless:
       raise ValueError(f"CSV header does not match mode {mode}: {path}")
-    # Hard-link reservation refuses collisions atomically. Replacement of the
-    # original below leaves the backup's bytes and permissions intact.
-    suffix = 0
-    while True:
-      number = f".{suffix}" if suffix else ""
-      backup = path.with_name(f"{path.stem}.heap_est_backup{number}{path.suffix}")
-      try:
-        os.link(path, backup)
-        break
-      except FileExistsError:
-        suffix += 1
-    temp_path = None
-    try:
-      with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as updated:
-        temp_path = Path(updated.name)
-        updated.write(header)
-      shutil.copymode(path, temp_path)
-      os.replace(temp_path, path)
-    finally:
-      if temp_path is not None:
-        temp_path.unlink(missing_ok=True)
-    print(f"Backed up legacy heap estimates: {backup}")
+    archive_and_replace_csv(path, header, "heap_est_backup")
     return
 
   with path.open("rb") as existing:
@@ -754,6 +808,8 @@ def main():
               env.pop("OFFLINE_PROFILE", None)
               parsed_calls = []
               peak_bytes = 0
+              offline_peak_bytes = 0
+              online_peak_bytes = 0
               for _ in range(calls_per_round):
                 proc = subprocess.run(cmd, cwd=str(APP_DIR), env=env,
                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -778,6 +834,16 @@ def main():
                     print("Algorithm heap measurement is missing or invalid; skipping result")
                     break
                   peak_bytes = max(peak_bytes, call_peak_bytes)
+                  if mode in CONTROL_MEMORY_MODES:
+                    call_offline_peak = parse_offline_memory_peak(output)
+                    call_online_peak = parse_online_memory_peak(output)
+                    if (call_offline_peak is None or not 0 < call_offline_peak <= call_peak_bytes or
+                        call_online_peak is None or not 0 < call_online_peak <= call_peak_bytes):
+                      had_failed_run = True
+                      print("Offline/online heap measurement is missing or invalid; skipping result")
+                      break
+                    offline_peak_bytes = max(offline_peak_bytes, call_offline_peak)
+                    online_peak_bytes = max(online_peak_bytes, call_online_peak)
                 parsed_calls.append(parsed)
 
               # A partial batch does not satisfy the requested sample count.
@@ -797,7 +863,14 @@ def main():
                 print(f"Measured algorithm heap peak: {peak_bytes} bytes ({recorded_memory_mib:.6f} MiB)")
 
               print("Out_lines: %s\n" % (parsed,))
-              result = make_result(mode, k_value, parsed, recorded_memory_mib)
+              offline_memory_mib = None
+              online_memory_mib = None
+              if mode in CONTROL_MEMORY_MODES:
+                offline_memory_mib = offline_peak_bytes / (1024.0 * 1024.0)
+                online_memory_mib = online_peak_bytes / (1024.0 * 1024.0)
+                print(f"Measured offline heap peak: {offline_peak_bytes} bytes ({offline_memory_mib:.6f} MiB)")
+                print(f"Measured online heap peak: {online_peak_bytes} bytes ({online_memory_mib:.6f} MiB)")
+              result = make_result(mode, k_value, parsed, recorded_memory_mib, offline_memory_mib, online_memory_mib)
               if mode == 6:
                 parallel = parse_parallel(output)
                 if parallel is None:

@@ -26,7 +26,8 @@ struct Enclave {
 };
 
 static double Run(Enclave &enclave, int mode, size_t n, size_t m, size_t k,
-                  size_t width, bool tracking, size_t *peak, double *ptime, size_t threads = 0) {
+                  size_t width, bool tracking, size_t *peak, double *ptime, size_t threads = 0,
+                  size_t *offline_peak = nullptr, size_t *online_peak = nullptr) {
   const size_t encrypted_width = width + 28;
   const size_t output_blocks = mode == 2 ? n : m * k;
   std::vector<unsigned char> input(n * encrypted_width), output(output_blocks * encrypted_width);
@@ -64,7 +65,17 @@ static double Run(Enclave &enclave, int mode, size_t n, size_t m, size_t k,
     assert(ret.memory_profile_status == MEMORY_PROFILE_VALID);
     const size_t floor = n * width + (mode == 2 ? 0 : m * k * width);
     assert(ret.algorithm_heap_peak_bytes >= floor);
+    if (mode >= 4 && mode <= 7) {
+      assert(ret.control_memory_profile_status == MEMORY_PROFILE_VALID);
+      assert(ret.online_memory_profile_status == MEMORY_PROFILE_VALID);
+      assert(ret.control_heap_peak_bytes > 0);
+      assert(ret.control_heap_peak_bytes <= ret.algorithm_heap_peak_bytes);
+      assert(ret.online_heap_peak_bytes >= floor);
+      assert(ret.online_heap_peak_bytes <= ret.algorithm_heap_peak_bytes);
+    }
   } else assert(ret.memory_profile_status == MEMORY_PROFILE_UNAVAILABLE);
+  if (offline_peak) *offline_peak = ret.control_heap_peak_bytes;
+  if (online_peak) *online_peak = ret.online_heap_peak_bytes;
   *peak = ret.algorithm_heap_peak_bytes;
   *ptime = ret.ptime;
   const size_t sample_size = mode == 2 ? (n % m == 0 ? m : n) : m;
@@ -168,6 +179,22 @@ int main(int argc, char **argv) {
     }
     assert(bad.memory_profile_status == MEMORY_PROFILE_INVALID);
   }
+  // Offline excludes payload width. Online includes input/output and controls.
+  for (int mode : {4, 5, 6, 7}) {
+    size_t first_offline = 0, previous_online = 0;
+    for (size_t width : {8U, 16U, 256U}) {
+      Enclave enclave(argv[1]);
+      size_t peak = 0, offline = 0, online = 0;
+      double ptime = 0;
+      Run(enclave, mode, 8192, 128, 64, width, true, &peak, &ptime, 1,
+          &offline, &online);
+      if (first_offline) assert(offline == first_offline);
+      if (previous_online) assert(online > previous_online);
+      first_offline = offline;
+      previous_online = online;
+    }
+  }
+  std::puts("PASS: offline payload exclusion and online payload/control ownership");
   // Identical allocation ownership and control tapes across the two FR backends.
   for (size_t width : {8U, 16U, 24U})
     for (size_t n : {64U, 65U}) {

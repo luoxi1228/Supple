@@ -370,6 +370,7 @@ extern "C" void DecFFOS_C_Opt(unsigned char *encrypted_buffer,
   bool prb_started=false;
   try {
     const size_t blocks=Product(M,K), bytes=Product(blocks,width);
+    memory.BeginOffline();
     PRB_pool_init(1); prb_started=true;
     long start=0,end=0;
     ocall_clock(&start);
@@ -386,16 +387,19 @@ extern "C" void DecFFOS_C_Opt(unsigned char *encrypted_buffer,
     std::vector<size_t>().swap(membership);
     ocall_clock(&end);
     ret->gen_perm_time=static_cast<double>(end-start)/1000.0;
+    memory.EndOffline();
     if (ret->collect_offline_profile) ret->offline_heap_peak_bytes=offline_profile::HeapPeakBytes();
 #ifdef COUNT_OSWAPS
     const uint64_t initial=OSWAP_COUNTER;
 #endif
+    memory.BeginOnline();
     std::vector<unsigned char> plain(bytes);
     ocall_clock(&start);
     FFOS_C_OptControlRead(decrypted,controls,N,M,K,width,plain.data(),blocks,
                          ret->collect_online_profile ? ret : nullptr);
     ocall_clock(&end);
     ret->apply_perm_time=static_cast<double>(end-start)/1000.0;
+    memory.EndOnline();
     ret->ptime=ret->gen_perm_time+ret->apply_perm_time;
     if (ret->collect_offline_profile) ret->total_heap_peak_bytes=offline_profile::HeapPeakBytes();
 #ifdef COUNT_OSWAPS

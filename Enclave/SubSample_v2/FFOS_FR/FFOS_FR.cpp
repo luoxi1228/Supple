@@ -938,6 +938,7 @@ void ffos_fr_detail::DecWithBackend(unsigned char *encrypted_buffer,
     free(decrypted);
     return;
   }
+  memory.BeginOffline();
   PRB_pool_init(1);
   try
   {
@@ -971,11 +972,13 @@ void ffos_fr_detail::DecWithBackend(unsigned char *encrypted_buffer,
     std::vector<size_t>().swap(membership);
     ocall_clock(&end);
     ret->gen_perm_time = static_cast<double>(end - start) / 1000.0;
+    memory.EndOffline();
     if (ret->collect_offline_profile)
       ret->offline_heap_peak_bytes = offline_profile::HeapPeakBytes();
 #ifdef COUNT_OSWAPS
     const uint64_t initial_oswaps = OSWAP_COUNTER;
 #endif
+    memory.BeginOnline();
     std::vector<unsigned char> plain(bytes);
     ocall_clock(&start);
     const FFOS_FRReadResult read = parallel
@@ -990,6 +993,7 @@ void ffos_fr_detail::DecWithBackend(unsigned char *encrypted_buffer,
         read.next.ofr_words != counts.ofr_words)
       throw std::logic_error("FFOS_FR control consumption/output mismatch");
     ret->apply_perm_time = static_cast<double>(end - start) / 1000.0;
+    memory.EndOnline();
     if (ret->collect_offline_profile)
       ret->total_heap_peak_bytes = offline_profile::HeapPeakBytes();
     ret->ptime = ret->gen_perm_time + ret->apply_perm_time;

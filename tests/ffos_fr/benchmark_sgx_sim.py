@@ -108,7 +108,7 @@ def main():
                                      text=True, capture_output=True, timeout=180,
                                      check=True)
                 lines = [line for line in run.stdout.strip().splitlines()
-                         if not line.startswith(("MEMORY,", "PARALLEL,"))]
+                         if not line.startswith(("MEMORY,", "OFFLINE_MEMORY,", "ONLINE_MEMORY,", "PARALLEL,"))]
                 if len(lines) != 5 + int(args.profile) + int(args.offline_profile):
                     raise RuntimeError(f"unexpected output for {name}, mode {mode}: "
                                        f"{run.stdout!r}; stderr={run.stderr!r}")

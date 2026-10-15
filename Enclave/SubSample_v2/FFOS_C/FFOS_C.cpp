@@ -351,6 +351,7 @@ extern "C" void DecFFOS_C(unsigned char *encrypted_buffer,
     return;
   }
 
+  memory.BeginOffline();
   PRB_pool_init(1);
 
   long t0, t1;
@@ -382,6 +383,7 @@ extern "C" void DecFFOS_C(unsigned char *encrypted_buffer,
   std::vector<size_t>().swap(M_matrix);
   ocall_clock(&t1);
   ret->gen_perm_time = static_cast<double>(t1 - t0) / 1000.0;
+  memory.EndOffline();
   if (ret->collect_offline_profile)
     ret->offline_heap_peak_bytes = offline_profile::HeapPeakBytes();
 
@@ -389,6 +391,7 @@ extern "C" void DecFFOS_C(unsigned char *encrypted_buffer,
   const uint64_t initial_oswaps = OSWAP_COUNTER;
 #endif
 
+  memory.BeginOnline();
   std::vector<unsigned char> plain_result(result_bytes, 0);
 
   ocall_clock(&t0);
@@ -398,6 +401,7 @@ extern "C" void DecFFOS_C(unsigned char *encrypted_buffer,
                      ret->collect_online_profile ? ret : nullptr);
   ocall_clock(&t1);
   ret->apply_perm_time = static_cast<double>(t1 - t0) / 1000.0;
+  memory.EndOnline();
   if (ret->collect_offline_profile)
     ret->total_heap_peak_bytes = offline_profile::HeapPeakBytes();
   ret->ptime = ret->gen_perm_time + ret->apply_perm_time;

@@ -118,6 +118,13 @@ Global Flags will sit in CONFIG.h
     int collect_memory_profile;
     size_t algorithm_heap_peak_bytes;
     int memory_profile_status;
+    // Allocations owned by control generation only (excludes decrypted input).
+    // Separate from offline_heap_peak_bytes, the legacy SGX heap watermark.
+    size_t control_heap_peak_bytes;
+    int control_memory_profile_status;
+    // Live payload, retained controls and buffers during control application.
+    size_t online_heap_peak_bytes;
+    int online_memory_profile_status;
   }enc_ret;
 
   #define __GLOBALS__

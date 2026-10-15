@@ -25,61 +25,61 @@ BASE_CONFIG: Dict[str, Any] = {
 # Each group overrides BASE_CONFIG fields.
 EXPERIMENT_GROUPS: List[Dict[str, Any]] = [
     {
-        "name": "group_n",
-        "modes": [7],
-        "p": [0.015625],
-        "n": [1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456], # 1M to 256M
-        "k": [1],
-        "k_select": 1,
-        "block_sizes": [16],
-        "repeat": 3,
-        "warmup": 1,
-        "results_folder": "RESULTS",
-        "overwrite": False,
-        "offline_profile": False,
-    },
-    {
-        "name": "group_p",
-        "modes": [7],
-        "p": [0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625], # 1/4 to 1/1024
-        "n": [1048576],
-        "k": [64],
-        "k_select": 2,
-        "block_sizes": [16],
-        "repeat": 3,
-        "warmup": 1,
-        "results_folder": "RESULTS",
-        "overwrite": False,
-        "offline_profile": False,
-    },
-    {
         "name": "group_k",
-        "modes": [7],
+        "modes": [5,7],
         "p": [0.015625],
         "n": [1048576],
         "k": [16,32,64,128,256,512,1024,2048,4096],   # 16 to 4096
         "k_select": 2,
         "block_sizes": [16],
-        "repeat": 3,
-        "warmup": 1,
+        "repeat": 1,
+        "warmup": 0,
         "results_folder": "RESULTS",
         "overwrite": False,
         "offline_profile": False,
     },
     {
         "name": "group_b",
-        "modes": [7],
+        "modes": [5,7],
         "p": [0.015625],
         "n": [1048576],
         "k": [1],
         "k_select": 1,
         "block_sizes": [16,32,64,128,256,512,1024,2048,4096], # 16 to 4096
-        "repeat": 3,
-        "warmup": 1,
+        "repeat": 1,
+        "warmup": 0,
         "results_folder": "RESULTS",
         "overwrite": False,
         "offline_profile": False,
-    }
+    },
+    {
+        "name": "group_n",
+        "modes": [5,7],
+        "p": [0.015625],
+        "n": [1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456], # 1M to 256M
+        "k": [1],
+        "k_select": 1,
+        "block_sizes": [16],
+        "repeat": 1,
+        "warmup": 0,
+        "results_folder": "RESULTS",
+        "overwrite": False,
+        "offline_profile": False,
+    },
+    {
+        "name": "group_p",
+        "modes": [5,7],
+        "p": [0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625], # 1/4 to 1/1024
+        "n": [1048576],
+        "k": [64],
+        "k_select": 2,
+        "block_sizes": [16],
+        "repeat": 1,
+        "warmup": 0,
+        "results_folder": "RESULTS",
+        "overwrite": False,
+        "offline_profile": False,
+    },
 
 ]
 

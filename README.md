@@ -212,6 +212,12 @@ leave one blank line between separate executions of `run_experiments.py`.
 Existing headerless files and files with a `heap_est_mb` header are preserved as
 `<mode>.heap_est_backup.csv` before a new result file is started; collisions
 use `.heap_est_backup.1.csv`, `.2.csv`, etc. Backups are never overwritten.
+For modes `4/5/6/7`, measured result files from before phase memory collection
+are preserved as `<mode>.phase_memory_backup.csv` (with numbered suffixes on
+collision), then migrated in place by appending the two new columns. Historical
+rows keep their measured total and leave both phase cells empty: those peaks
+cannot be recovered from the total. New runs append actual phase measurements.
+Blank separators and `#` comment rows are preserved during migration.
 `--overwrite` keeps its explicit replacement behavior. Other modes retain
 their existing headerless format and estimated-memory metric.
 
@@ -240,6 +246,9 @@ Columns:
 Modes `1`, `3`, `4`, `5`, and `7` use `ecall_time_ms`, `ptime_ms`,
 `gen_perm_offline_ms`, and `apply_perm_online_ms` in their CSV headers.
 Their final column is `algorithm_heap_peak_mib` instead of `heap_est_mb`.
+Modes `4`, `5`, and `7` additionally append `offline_heap_peak_mib` and
+`online_heap_peak_mib`. Mode `6` appends the same two fields after its thread
+budget fields. Existing total-memory and timing column positions are retained.
 
 Mode `1` has no offline phase: `gen_perm=0` and `apply_perm=ptime`. Use `k=1`
 for a single sample and `k>1` for repeated shuffle-and-truncate sampling.
@@ -267,6 +276,23 @@ SGX SIM tests including mode 3: `bash tests/memory/run_sgx_tests.sh`.
 
 Where:
 
+- `offline_heap_peak_mib` (**Offline Peak Memory**, modes 4/5/6/7) is the peak
+    simultaneous requested heap bytes owned by control generation, divided by
+    1,048,576. It includes membership words, packed controls and their plans,
+    temporary auxiliary arrays, PRB, and control-generation worker resources.
+    Allocations are tagged at creation, so already decrypted input and online
+    output payloads are excluded. The peak is finalized after controls are
+    generated and membership/workspaces are released; earlier temporary peaks
+    remain included. Retained control arrays also count in the online phase.
+- `online_heap_peak_mib` (**Online Peak Memory**, modes 4/5/6/7) is the peak
+    simultaneous live requested heap bytes from plaintext output allocation
+    through control application, data movement and sample shuffling. It includes
+    input/output payload, retained controls, intermediate data buffers and
+    auxiliary storage. AES input decryption and output encryption fall outside
+    this interval. Offline and online peaks are independent; do not add them.
+    Both columns take the maximum over measured rounds, excluding warmup, and
+    aggregate simultaneous allocations across all workers. Collection runs by
+    default and does not require `--offline-profile`.
 - `heap_est_mb` is the estimated heap size (MB) used to patch `Enclave.config.xml`
     before each run, retained in the CSV only for modes 10/11/12/13.
 - `algorithm_heap_peak_mib` (modes 1/2/3/4/5/6/7) is the maximum simultaneous live
@@ -284,7 +310,9 @@ The enclave records allocation/free events in the same execution, with no
 sampling or additional clock OCALLs. A 16,384-slot table is kept below 50%
 occupancy; ledger overflow, allocation failure, failed execution or missing
 `MEMORY,<peak_bytes>` output prevents writing a normal result and makes the
-experiment command fail. The heap estimate still configures the enclave and
+experiment command fail. Modes 4/5/6/7 also require valid `OFFLINE_MEMORY,<bytes>`
+and `ONLINE_MEMORY,<bytes>` records; a missing, zero or inconsistent phase peak
+prevents writing that result. The heap estimate still configures the enclave and
 appears in console diagnostics. The optional offline profile's existing SGX
 heap-growth fields retain their separate meaning.
 

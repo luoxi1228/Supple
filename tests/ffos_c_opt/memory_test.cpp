@@ -39,12 +39,22 @@ int main() {
     uint64_t legacy_gates=0;
     for (int mode:{4,5,7}) {
       size_t first_peak=0;
+      size_t first_offline_peak=0;
+      size_t first_online_peak=0;
       uint64_t last_gates=0;
       for (int round=0;round<2;++round) {
         auto ret=Run(mode,input,output,n,m,k,width);
         assert(ret.memory_profile_status==MEMORY_PROFILE_VALID && tracker.current==0);
+        assert(ret.control_memory_profile_status==MEMORY_PROFILE_VALID && tracker.offline_current==0);
+        assert(ret.control_heap_peak_bytes>0 && ret.control_heap_peak_bytes<=ret.algorithm_heap_peak_bytes);
+        assert(ret.online_memory_profile_status==MEMORY_PROFILE_VALID);
+        assert(ret.online_heap_peak_bytes>=n*width+m*k*width && ret.online_heap_peak_bytes<=ret.algorithm_heap_peak_bytes);
         if (round) assert(ret.algorithm_heap_peak_bytes==first_peak);
+        if (round) assert(ret.control_heap_peak_bytes==first_offline_peak);
+        if (round) assert(ret.online_heap_peak_bytes==first_online_peak);
         first_peak=ret.algorithm_heap_peak_bytes;
+        first_offline_peak=ret.control_heap_peak_bytes;
+        first_online_peak=ret.online_heap_peak_bytes;
         last_gates=ret.OSWAP_count;
         if (mode==4) { expected=output; legacy_peak=first_peak; legacy_gates=ret.OSWAP_count; }
         if (mode==7) { assert(output==expected && ret.OSWAP_count==legacy_gates); opt_peak=first_peak; }
@@ -55,6 +65,18 @@ int main() {
     // Detect accidental restoration of per-depth payload allocations.
     assert(opt_peak<legacy_peak && opt_peak<3*n*width+7*n);
   }
+  // Control generation is independent of payload width and excludes input.
+  for (int mode:{4,5,7}) {
+    size_t first=0;
+    for (size_t width:{8U,16U,256U}) {
+      const size_t n=8192,m=128,k=64;
+      std::vector<unsigned char> input(n*width),output(m*k*width);
+      auto ret=Run(mode,input,output,n,m,k,width);
+      assert(ret.control_memory_profile_status==MEMORY_PROFILE_VALID);
+      if (first) assert(ret.control_heap_peak_bytes==first);
+      first=ret.control_heap_peak_bytes;
+    }
+  }
   // Every throwing STL/scratch allocation must unwind the ECALL cleanly.
   const size_t n=128,m=2,k=64,width=16;
   std::vector<unsigned char> input(n*width),output(m*k*width);
@@ -63,7 +85,7 @@ int main() {
     fail_after=point;
     auto ret=Run(7,input,output,n,m,k,width);
     fail_after=-1;
-    assert(tracker.current==0);
+    assert(tracker.current==0 && tracker.offline_current==0);
     if (ret.memory_profile_status==MEMORY_PROFILE_VALID) break;
     assert(ret.memory_profile_status==MEMORY_PROFILE_INVALID);
     ++failures;

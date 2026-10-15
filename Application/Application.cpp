@@ -194,7 +194,10 @@ int main(int argc, char *argv[]) {
   size_t offline_heap_peak_bytes = 0;
   size_t total_heap_peak_bytes = 0;
   size_t algorithm_heap_peak_bytes = 0;
+  size_t control_heap_peak_bytes = 0;
+  size_t online_heap_peak_bytes = 0;
   const bool profile_memory = MODE >= 1 && MODE <= 7;
+  const bool profile_control_memory = MODE >= 4 && MODE <= 7;
   size_t num_oswaps[TOTAL_ROUNDS] = {};
 
   OpenSSL_add_all_algorithms();   // Initialize libcrypto
@@ -473,6 +476,23 @@ int main(int argc, char *argv[]) {
       if (r >= WARMUP)
         algorithm_heap_peak_bytes = std::max(algorithm_heap_peak_bytes,
                                             ret.algorithm_heap_peak_bytes);
+      if (profile_control_memory) {
+        if (ret.control_memory_profile_status != MEMORY_PROFILE_VALID ||
+            ret.control_heap_peak_bytes == 0 ||
+            ret.control_heap_peak_bytes > ret.algorithm_heap_peak_bytes ||
+            ret.online_memory_profile_status != MEMORY_PROFILE_VALID ||
+            ret.online_heap_peak_bytes == 0 ||
+            ret.online_heap_peak_bytes > ret.algorithm_heap_peak_bytes) {
+          fprintf(stderr, "Offline/online heap measurement failed in round %zu (mode %u)\n", r, MODE);
+          return 1;
+        }
+        if (r >= WARMUP) {
+          control_heap_peak_bytes = std::max(control_heap_peak_bytes,
+                                             ret.control_heap_peak_bytes);
+          online_heap_peak_bytes = std::max(online_heap_peak_bytes,
+                                            ret.online_heap_peak_bytes);
+        }
+      }
     }
 
     if (ret.collect_offline_profile) {
@@ -570,6 +590,10 @@ int main(int argc, char *argv[]) {
     printf("PARALLEL,%zu,%zu,%zu\n", PAR_THREADS, PAR_AVAILABLE, PAR_EFFECTIVE);
   if (profile_memory)
     printf("MEMORY,%zu\n", algorithm_heap_peak_bytes);
+  if (profile_control_memory)
+    printf("OFFLINE_MEMORY,%zu\n", control_heap_peak_bytes);
+  if (profile_control_memory)
+    printf("ONLINE_MEMORY,%zu\n", online_heap_peak_bytes);
   if (profile_online && (MODE == 4 || MODE == 5 || MODE == 6 || MODE == 7)) {
     const double route = calculateAve(online_route_array + WARMUP, REPEAT);
     const double reorder = calculateAve(online_reorder_array + WARMUP, REPEAT);

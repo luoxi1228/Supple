@@ -33,6 +33,19 @@ include online backup allocation/copying; no online work moves offline.
 Plan construction is timed offline and its allocation counts toward the peak.
 Scratch sizes and execution order depend only on public dimensions.
 
+The mode 7 heap configuration also reserves the root membership's size during
+the online phase. Membership is freed before the plaintext output is allocated,
+but the live packed controls can separate that free block from the heap tail.
+Large outputs therefore need additional contiguous heap capacity, as seen at
+N=1,048,576, M=16,384, B=16 and K=2,048 or 4,096. This reservation affects
+`HeapMaxSize`; the reported allocation peak continues to count live bytes only.
+
+Normal result CSVs for modes 4/5/6/7 also report `offline_heap_peak_mib`
+(membership, controls and control-generation auxiliary allocations, excluding
+decrypted payload) and `online_heap_peak_mib` (live payload, retained controls
+and intermediate buffers during data movement). Each phase has an independent
+peak across measured rounds. No diagnostic profiling option is needed.
+
 Non-exact roots/frontier edges retain filtering followed by a copy into the
 final subtree output, as in FR. All later exact-fit descendants reuse output
 slices. Input/output aliasing in the low-level reader is rejected before writes;

@@ -175,6 +175,143 @@ int main(int argc, char **argv) {
       assert(ret.algorithm_heap_peak_bytes >= 32 * 17 * 101);
       Expect(Measure([] {}), 0);
     }
+  } else if (std::strcmp(test, "offline") == 0) {
+    enc_ret ret{};
+    ret.collect_memory_profile = 1;
+    {
+      memory_profile::Scope scope(&ret);
+      void *input = __wrap_malloc(1000);
+      scope.BeginOffline();
+      void *a = __wrap_malloc(100), *b = __wrap_malloc(150);
+      __wrap_free(input); // a baseline subtraction would lose these live bytes
+      __wrap_free(a);
+      void *c = __wrap_malloc(200);
+      scope.EndOffline();
+      __wrap_free(b); __wrap_free(c);
+      void *output = __wrap_malloc(4000);
+      __wrap_free(output);
+      scope.Complete();
+    }
+    Expect(ret, 4000);
+    assert(ret.control_memory_profile_status == MEMORY_PROFILE_VALID);
+    assert(ret.control_heap_peak_bytes == 350);
+    ret = enc_ret{};
+    ret.collect_memory_profile = 1;
+    {
+      memory_profile::Scope scope(&ret);
+      void *input = __wrap_malloc(1000);
+      scope.BeginOffline();
+      void *p = __wrap_malloc(100);
+      move_next = true; old_realloc_bytes = 100;
+      p = __wrap_realloc(p, 200);
+      scope.EndOffline();
+      __wrap_free(p); __wrap_free(input);
+      scope.Complete();
+    }
+    Expect(ret, 1300);
+    assert(ret.control_heap_peak_bytes == 300); // moving realloc overlap
+    ret = enc_ret{};
+    ret.collect_memory_profile = 1;
+    {
+      memory_profile::Scope scope(&ret);
+      void *input = __wrap_malloc(1000);
+      scope.BeginOffline();
+      void *controls = __wrap_malloc(100), *membership = __wrap_malloc(2000);
+      __wrap_free(membership);
+      scope.EndOffline();
+      scope.BeginOnline();
+      void *output = __wrap_malloc(500);
+      scope.EndOnline();
+      void *crypto = __wrap_malloc(4000); // outside data movement
+      __wrap_free(crypto); __wrap_free(output);
+      __wrap_free(controls); __wrap_free(input);
+      scope.Complete();
+    }
+    Expect(ret, 5600);
+    assert(ret.control_heap_peak_bytes == 2100);
+    assert(ret.online_memory_profile_status == MEMORY_PROFILE_VALID);
+    assert(ret.online_heap_peak_bytes == 1600); // input + controls + output
+    void *cache = nullptr;
+    for (size_t round = 0; round < 2; ++round) {
+      ret = enc_ret{};
+      ret.collect_memory_profile = 1;
+      {
+        memory_profile::Scope scope(&ret);
+        void *input = __wrap_malloc(1000);
+        scope.BeginOffline();
+        if (!cache) cache = __wrap_malloc(100);
+        void *scratch = __wrap_malloc(40);
+        __wrap_free(scratch);
+        scope.EndOffline();
+        __wrap_free(input);
+        scope.Complete();
+      }
+      Expect(ret, 1140);
+      assert(ret.control_heap_peak_bytes == 140);
+    }
+    __wrap_free(cache);
+    ret = enc_ret{};
+    ret.collect_memory_profile = 1;
+    {
+      memory_profile::Scope scope(&ret);
+      scope.BeginOffline();
+      void *p = __wrap_malloc(50);
+      __wrap_free(p);
+      scope.EndOffline();
+      scope.Complete();
+    }
+    Expect(ret, 50);
+    assert(ret.control_heap_peak_bytes == 50); // not the previous round's peak
+    ret = enc_ret{};
+    ret.collect_memory_profile = 1;
+    {
+      memory_profile::Scope scope(&ret);
+      scope.BeginOffline();
+      scope.EndOffline();
+      // A later algorithm failure invalidates the completed offline result.
+    }
+    assert(ret.control_memory_profile_status == MEMORY_PROFILE_INVALID);
+    ret = enc_ret{};
+    ret.collect_memory_profile = 1;
+    {
+      memory_profile::Scope scope(&ret);
+      scope.BeginOffline();
+      scope.Complete(); // missing offline checkpoint must fail closed
+    }
+    assert(ret.memory_profile_status == MEMORY_PROFILE_INVALID);
+    assert(ret.control_memory_profile_status == MEMORY_PROFILE_INVALID);
+    Expect(Measure([] {}), 0);
+    ret = enc_ret{};
+    {
+      memory_profile::Scope scope(&ret); // collection disabled
+      scope.BeginOffline(); scope.EndOffline(); scope.Complete();
+    }
+    assert(ret.control_memory_profile_status == MEMORY_PROFILE_UNAVAILABLE);
+  } else if (std::strcmp(test, "offline_parallel") == 0) {
+    enc_ret ret{};
+    ret.collect_memory_profile = 1;
+    {
+      memory_profile::Scope scope(&ret);
+      void *input = __wrap_malloc(10000);
+      scope.BeginOffline();
+      {
+        std::atomic<size_t> ready{0};
+        std::vector<std::thread> workers;
+        for (size_t i = 0; i < 8; ++i) workers.emplace_back([&] {
+          void *p = __wrap_calloc(17, 101);
+          ++ready;
+          while (ready.load() != 8) std::this_thread::yield();
+          __wrap_free(p);
+        });
+        for (auto &worker : workers) worker.join();
+      }
+      scope.EndOffline();
+      __wrap_free(input);
+      scope.Complete();
+    }
+    assert(ret.control_memory_profile_status == MEMORY_PROFILE_VALID);
+    assert(ret.control_heap_peak_bytes >= 8 * 17 * 101);
+    Expect(ret, 10000 + ret.control_heap_peak_bytes);
   } else if (std::strcmp(test, "failure") == 0) {
     auto ret = Measure([] { fail_next = true; assert(!__wrap_malloc(100)); });
     assert(ret.memory_profile_status == MEMORY_PROFILE_INVALID);
